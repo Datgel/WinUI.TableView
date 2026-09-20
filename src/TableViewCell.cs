@@ -385,6 +385,34 @@ public partial class TableViewCell : ContentControl
     }
 
     /// <summary>
+    /// Begins editing this cell, as a double tap or F2 does.
+    /// </summary>
+    /// <remarks>
+    /// The control starts an edit session from <see cref="OnDoubleTapped"/> and from the
+    /// <c>TableView</c> key handler, but offers no public way to ask for one. A column whose RESTING
+    /// cell carries an affordance of its own - a drop-down arrow, a picker button - needs to open the
+    /// editor on a single click of that affordance, and that is not a gesture the control can infer.
+    /// <para>The same conditions apply as to a double tap: a read-only cell, a cell with no owning
+    /// <see cref="TableView"/>, a table that is already editing, or a column drawing itself through
+    /// <see cref="TableViewColumn.UseSingleElement"/> will not begin an edit, and this returns
+    /// <see langword="false"/>. <c>BeginningEdit</c> is raised, and a handler that cancels it is
+    /// honoured, exactly as on the existing paths.</para>
+    /// <para>This is the v1.4.1 shape of w-ahmad/WinUI.TableView#431: on that branch
+    /// <c>BeginCellEditing</c> is synchronous, so the PR returns <see langword="bool"/>. Here it is
+    /// <c>async Task&lt;bool&gt;</c>, so this returns the task rather than blocking on it.</para>
+    /// </remarks>
+    /// <returns><see langword="true"/> if the cell entered edit mode; otherwise <see langword="false"/>.</returns>
+    public Task<bool> BeginEdit()
+    {
+        if (IsReadOnly || TableView is null || TableView.IsEditing || Column?.UseSingleElement is not false)
+        {
+            return Task.FromResult(false);
+        }
+
+        return BeginCellEditing(new RoutedEventArgs());
+    }
+
+    /// <summary>
     /// Prepares the cell for editing.
     /// </summary>
     internal void PrepareForEdit(RoutedEventArgs editingArgs)

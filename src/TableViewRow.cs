@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Data;
@@ -12,6 +13,7 @@ using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
 using Windows.Foundation;
+using WinUI.TableView.Automation;
 using WinUI.TableView.Extensions;
 using WinUI.TableView.Helpers;
 
@@ -115,6 +117,11 @@ public partial class TableViewRow : ListViewItem
         EnsureLayout();
     }
 
+#if !WINDOWS
+    /// <inheritdoc/>
+    protected override AutomationPeer OnCreateAutomationPeer() => new TableViewRowAutomationPeer(this);
+
+#endif
     /// <inheritdoc/>
     protected override void OnApplyTemplate()
     {

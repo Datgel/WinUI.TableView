@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Data;
@@ -18,6 +19,7 @@ using Windows.Foundation;
 using Windows.Storage;
 using Windows.Storage.Pickers;
 using Windows.System;
+using WinUI.TableView.Automation;
 using WinUI.TableView.Extensions;
 using WinUI.TableView.Helpers;
 
@@ -130,6 +132,52 @@ public partial class TableView : ListView
 
         _rows.Add(row);
         return row;
+    }
+
+#if WINDOWS
+    /// <inheritdoc/>
+    protected override AutomationPeer OnCreateAutomationPeer() => new TableViewAutomationPeer(this);
+#endif
+
+    /// <summary>
+    /// Whether the specified cell is in the selected cell ranges. Read from the ranges rather than
+    /// <see cref="SelectedCells"/>, which is refreshed on the dispatcher after a selection change.
+    /// </summary>
+    internal bool IsCellInSelection(TableViewCellSlot slot) => SelectedCellRanges.Any(range => range.Contains(slot));
+
+    /// <summary>Whether any cell other than the specified one is selected.</summary>
+    internal bool IsAnotherCellSelected(TableViewCellSlot slot) =>
+        SelectedCellRanges.Any(range => range.Any(x => x != slot));
+
+    /// <summary>
+    /// Selects a cell on behalf of UI Automation, through the same path a click takes (so the current
+    /// cell moves with it): replacing the selection, or adding to it as a Ctrl+click would.
+    /// </summary>
+    internal void SelectCellForAutomation(TableViewCellSlot slot, bool addToSelection)
+    {
+        // In Multiple mode every selection is additive (MakeSelection forces Ctrl), so a Select that
+        // must replace the selection clears it first.
+        if (!addToSelection && SelectionMode is ListViewSelectionMode.Multiple)
+        {
+            DeselectAll();
+        }
+
+        SelectionStartCellSlot = slot;
+        MakeSelection(slot, false, addToSelection);
+    }
+
+    /// <summary>
+    /// Selects a row on behalf of UI Automation: replacing the selection, or adding the row to it.
+    /// </summary>
+    internal void SelectRowForAutomation(int index, bool addToSelection)
+    {
+        if (!addToSelection && SelectionMode is ListViewSelectionMode.Multiple)
+        {
+            DeselectAll();
+        }
+
+        SelectionStartRowIndex = index;
+        MakeSelection(new TableViewCellSlot(index, -1), false, addToSelection);
     }
 
     /// <inheritdoc/>

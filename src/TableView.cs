@@ -166,20 +166,6 @@ public partial class TableView : ListView
         MakeSelection(slot, false, addToSelection);
     }
 
-    /// <summary>
-    /// Selects a row on behalf of UI Automation: replacing the selection, or adding the row to it.
-    /// </summary>
-    internal void SelectRowForAutomation(int index, bool addToSelection)
-    {
-        if (!addToSelection && SelectionMode is ListViewSelectionMode.Multiple)
-        {
-            DeselectAll();
-        }
-
-        SelectionStartRowIndex = index;
-        MakeSelection(new TableViewCellSlot(index, -1), false, addToSelection);
-    }
-
     /// <inheritdoc/>
     protected override async void OnKeyDown(KeyRoutedEventArgs e)
     {

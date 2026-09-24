@@ -29,7 +29,7 @@ internal enum SelectionItemAction
 }
 
 /// <summary>
-/// The UI Automation <c>SelectionItem</c> semantics shared by the row and cell peers.
+/// The UI Automation <c>SelectionItem</c> semantics the cell peer follows.
 /// </summary>
 /// <remarks>
 /// <c>Select</c> deselects everything else. <c>AddToSelection</c> on a single-selection table is

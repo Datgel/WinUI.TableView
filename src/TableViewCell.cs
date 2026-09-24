@@ -368,10 +368,28 @@ public partial class TableViewCell : ContentControl
     /// Initiates editing mode for the current cell, raising the beginning edit event and allowing cancellation.
     /// </summary>
     /// <param name="editingArgs">The event data associated with the editing request. Cannot be null.</param>
+    /// <remarks>
+    /// <para>A column drawing itself through <see cref="TableViewColumn.UseSingleElement"/> never enters
+    /// an edit session, and that refusal is decided HERE - in the one method every route into a session
+    /// reaches - rather than once per caller. <see cref="OnDoubleTapped"/> and <see cref="BeginEdit"/>
+    /// each carry their own earlier check, so for them this is belt-and-braces; the keyboard route
+    /// (<c>TableView.HandleNavigations</c>, F2 and the tab/enter hop) carried none, so a check box or a
+    /// toggle switch DID enter a session. Nothing was regenerated - <see cref="SetEditingElement"/>
+    /// answers with the resting content on such a column - but <see cref="TableView"/> was left
+    /// reporting <c>IsEditing</c> with no editor behind it, and that state suppresses arrow-key
+    /// navigation, every cell's double-tap and every <see cref="BeginEdit"/> until it is ended.</para>
+    /// <para>Guarding the callers one at a time is what produced that gap: two of the three routes
+    /// remembered the flag and the third did not. A fourth route cannot forget.</para>
+    /// </remarks>
     /// <returns>A task that represents the asynchronous operation. The task result is <see langword="true"/> if cell editing was
     /// successfully started; otherwise, <see langword="false"/> if the operation was canceled.</returns>
     internal async Task<bool> BeginCellEditing(RoutedEventArgs editingArgs)
     {
+        if (Column?.UseSingleElement is true)
+        {
+            return false;
+        }
+
         var args = new TableViewBeginningEditEventArgs(this, Row?.Content, Column!, editingArgs);
         TableView?.OnBeginningEdit(args);
 

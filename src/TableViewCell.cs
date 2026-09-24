@@ -1,5 +1,7 @@
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -9,6 +11,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Windows.Foundation;
+using WinUI.TableView.Automation;
 using WinUI.TableView.Extensions;
 using WinUI.TableView.Helpers;
 
@@ -36,6 +39,7 @@ public partial class TableViewCell : ContentControl
     private object? _uneditedValue;
     private RoutedEventArgs? _editingArgs;
     private IList<TableViewConditionalCellStyle>? _cellStyles;
+    private bool? _lastAppliedSelection;
 
     /// <summary>
     /// Initializes a new instance of the TableViewCell class.
@@ -529,9 +533,24 @@ public partial class TableViewCell : ContentControl
     /// </summary>
     internal void ApplySelectionState()
     {
-        var stateName = IsSelected ? VisualStates.StateSelected : VisualStates.StateUnselected;
+        var isSelected = IsSelected;
+        var stateName = isSelected ? VisualStates.StateSelected : VisualStates.StateUnselected;
         VisualStates.GoToState(this, false, stateName);
+
+        // Tell a listening screen reader, so a selection change is announced rather than found. The
+        // first application after the cell is realized is its initial state, not a change.
+        var previous = _lastAppliedSelection;
+        _lastAppliedSelection = isSelected;
+        if (previous.HasValue && previous.Value != isSelected
+            && AutomationPeer.ListenerExists(AutomationEvents.PropertyChanged)
+            && FrameworkElementAutomationPeer.FromElement(this) is { } peer)
+        {
+            peer.RaisePropertyChangedEvent(SelectionItemPatternIdentifiers.IsSelectedProperty, previous.Value, isSelected);
+        }
     }
+
+    /// <inheritdoc/>
+    protected override AutomationPeer OnCreateAutomationPeer() => new TableViewCellAutomationPeer(this);
 
     /// <summary>
     /// Applies the current cell state to the cell.

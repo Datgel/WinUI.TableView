@@ -1,6 +1,7 @@
 using Microsoft.UI;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -12,6 +13,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Windows.System;
 using Windows.UI.Core;
+using WinUI.TableView.Automation;
 using WinUI.TableView.Collections;
 using WinUI.TableView.Extensions;
 using SD = WinUI.TableView.SortDirection;
@@ -372,6 +374,9 @@ public partial class TableViewColumnHeader : ContentControl
     {
         e.Handled = true;
     }
+
+    /// <inheritdoc/>
+    protected override AutomationPeer OnCreateAutomationPeer() => new TableViewColumnHeaderAutomationPeer(this);
 
     /// <summary>
     /// Handles changes to the SortDirection property.

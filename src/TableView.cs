@@ -37,6 +37,7 @@ public partial class TableView : ListView
     private RowDefinition? _headerRowDefinition;
     private bool _shouldThrowSelectionModeChangedException;
     private bool _ensureColumns = true;
+    private (TableViewCellSlot Slot, TaskCompletionSource<bool> Completion)? _pendingEdit;
     private readonly List<TableViewRow> _rows = [];
     private readonly CollectionView _collectionView = [];
 
@@ -264,6 +265,71 @@ public partial class TableView : ListView
             MakeSelection(newSlot, shiftKey);
             e.Handled = true;
         }
+    }
+
+    /// <summary>
+    /// Makes the cell at <paramref name="slot"/> the current cell and begins editing it, as pressing F2 on
+    /// that cell does.
+    /// </summary>
+    /// <remarks>
+    /// Backport of w-ahmad/WinUI.TableView#431 (DH-616). An edit in progress on another cell is committed
+    /// first, as tapping or tabbing to a different cell does; the cell is then made current and selected
+    /// through <c>MakeSelection</c>, as keyboard navigation does; and the edit begins as F2 does, raising
+    /// <see cref="BeginningEdit"/>. Returns <see langword="false"/> for a read-only table, column or cell, a
+    /// <see cref="TableViewColumn.UseSingleElement"/> column, a slot outside the table, or the cell already
+    /// being edited.
+    /// </remarks>
+    public async Task<bool> BeginEditAsync(TableViewCellSlot slot)
+    {
+        if (IsReadOnly || !slot.IsValid(this))
+        {
+            return false;
+        }
+
+        if (IsEditing)
+        {
+            if (CurrentCellSlot == slot)
+            {
+                return false;
+            }
+
+            if (CurrentCellSlot is { } currentSlot
+                && GetCellFromSlot(currentSlot) is { } currentCell
+                && !EndCellEditing(TableViewEditAction.Commit, currentCell))
+            {
+                return false;
+            }
+
+            SetIsEditing(false);
+        }
+
+        _pendingEdit?.Completion.TrySetResult(false);
+        _pendingEdit = null;
+
+        if (CurrentCellSlot == slot)
+        {
+            return await TryBeginEditAsync(await ScrollCellIntoView(slot));
+        }
+
+        var pending = new TaskCompletionSource<bool>();
+        _pendingEdit = (slot, pending);
+
+        MakeSelection(slot, false);
+
+        if (CurrentCellSlot != slot)
+        {
+            _pendingEdit = null;
+            return false;
+        }
+
+        return await pending.Task;
+    }
+
+    private async Task<bool> TryBeginEditAsync(TableViewCell? cell)
+    {
+        return cell is { IsReadOnly: false, Column.UseSingleElement: false }
+            && !IsEditing
+            && await cell.BeginCellEditing(new RoutedEventArgs());
     }
 
     internal bool EndCellEditing(TableViewEditAction editAction, TableViewCell cell)
@@ -1183,6 +1249,14 @@ public partial class TableView : ListView
         {
             var cell = await ScrollCellIntoView(newSlot.Value);
             cell?.ApplyCurrentCellState();
+
+            // A BeginEditAsync call that moved the current cell starts its edit here, once the cell has
+            // been scrolled into view, so that the editing element is the last thing to take focus.
+            if (_pendingEdit is { } pending && pending.Slot == newSlot.Value)
+            {
+                _pendingEdit = null;
+                pending.Completion.TrySetResult(CurrentCellSlot == newSlot && await TryBeginEditAsync(cell));
+            }
         }
     }
 

@@ -374,53 +374,59 @@ public class TableViewAutomationPeerTests
 
     // ─── OnCreateAutomationPeer wiring ──────────────────────────────────────
 
+    // Datgel fork (DH-1879): the controls create the DH-1445 peers (WinUI.TableView.Automation), not
+    // v1.5.0's, and create NO vendor row or row-header peer - so a consumer's automation tree is
+    // unchanged from 1.4.1.3. v1.5.0's five "OnCreateAutomationPeer returns <our v1.5.0 peer>" tests
+    // are replaced by these, which pin the fork's routing instead. The v1.5.0 peer classes are still
+    // tested directly above. Converging on them is DH-1880.
+
     [UITestMethod]
-    public void TableView_OnCreateAutomationPeer_ReturnsTableViewAutomationPeer()
+    public void TableView_OnCreateAutomationPeer_ReturnsTheForksTablePeer()
     {
         var tableView = new TableView();
 
         var peer = FrameworkElementAutomationPeer.CreatePeerForElement(tableView);
 
-        Assert.IsInstanceOfType(peer, typeof(TableViewAutomationPeer));
+        Assert.IsInstanceOfType(peer, typeof(WinUI.TableView.Automation.TableViewAutomationPeer));
     }
 
     [UITestMethod]
-    public void TableViewRow_OnCreateAutomationPeer_ReturnsTableViewRowAutomationPeer()
+    public void TableViewRow_OnCreateAutomationPeer_CreatesNoVendorPeer()
     {
         var row = new TableViewRow();
 
         var peer = FrameworkElementAutomationPeer.CreatePeerForElement(row);
 
-        Assert.IsInstanceOfType(peer, typeof(TableViewRowAutomationPeer));
+        Assert.AreEqual(typeof(ListViewItemAutomationPeer), peer.GetType());
     }
 
     [UITestMethod]
-    public void TableViewCell_OnCreateAutomationPeer_ReturnsTableViewCellAutomationPeer()
+    public void TableViewCell_OnCreateAutomationPeer_ReturnsTheForksCellPeer()
     {
         var cell = new TableViewCell();
 
         var peer = FrameworkElementAutomationPeer.CreatePeerForElement(cell);
 
-        Assert.IsInstanceOfType(peer, typeof(TableViewCellAutomationPeer));
+        Assert.IsInstanceOfType(peer, typeof(WinUI.TableView.Automation.TableViewCellAutomationPeer));
     }
 
     [UITestMethod]
-    public void TableViewColumnHeader_OnCreateAutomationPeer_ReturnsTableViewColumnHeaderAutomationPeer()
+    public void TableViewColumnHeader_OnCreateAutomationPeer_ReturnsTheForksHeaderPeer()
     {
         var header = new TableViewColumnHeader();
 
         var peer = FrameworkElementAutomationPeer.CreatePeerForElement(header);
 
-        Assert.IsInstanceOfType(peer, typeof(TableViewColumnHeaderAutomationPeer));
+        Assert.IsInstanceOfType(peer, typeof(WinUI.TableView.Automation.TableViewColumnHeaderAutomationPeer));
     }
 
     [UITestMethod]
-    public void TableViewRowHeader_OnCreateAutomationPeer_ReturnsTableViewRowHeaderAutomationPeer()
+    public void TableViewRowHeader_OnCreateAutomationPeer_CreatesNoVendorPeer()
     {
         var rowHeader = new TableViewRowHeader();
 
         var peer = FrameworkElementAutomationPeer.CreatePeerForElement(rowHeader);
 
-        Assert.IsInstanceOfType(peer, typeof(TableViewRowHeaderAutomationPeer));
+        Assert.IsNotInstanceOfType(peer, typeof(TableViewRowHeaderAutomationPeer));
     }
 }

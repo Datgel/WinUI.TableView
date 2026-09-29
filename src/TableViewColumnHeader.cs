@@ -10,6 +10,7 @@ using Microsoft.UI.Xaml.Shapes;
 using Windows.Foundation;
 using Windows.System;
 using Windows.UI.Core;
+using WinUI.TableView.Automation;
 using WinUI.TableView.Collections;
 using WinUI.TableView.Controls;
 using WinUI.TableView.Extensions;
@@ -393,6 +394,9 @@ public partial class TableViewColumnHeader : ContentControl
     {
         e.Handled = true;
     }
+
+    /// <inheritdoc/>
+    protected override AutomationPeer OnCreateAutomationPeer() => new TableViewColumnHeaderAutomationPeer(this);
 
     /// <summary>
     /// Handles changes to the SortDirection property.
@@ -794,9 +798,7 @@ public partial class TableViewColumnHeader : ContentControl
         }
     }
 
-    /// <inheritdoc/>
-    protected override AutomationPeer OnCreateAutomationPeer()
-    {
-        return new AutomationPeers.TableViewColumnHeaderAutomationPeer(this);
-    }
+    // Datgel fork (DH-1879): v1.5.0's own OnCreateAutomationPeer override stood here, returning
+    // AutomationPeers.TableViewColumnHeaderAutomationPeer. The DH-1445 override above (the
+    // WinUI.TableView.Automation peer) is the one this fork creates; see TableView.Accessibility.cs.
 }

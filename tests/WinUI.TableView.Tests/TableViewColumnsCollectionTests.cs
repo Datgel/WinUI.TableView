@@ -229,20 +229,32 @@ public class TableViewColumnsCollectionTests
     public void Add_ManyColumns_ShouldNotBeSuperLinear()
     {
         // Guards the fix for UpdateFrozenColumns evaluating VisibleColumns inside its loop on every
-        // Add, which made building an n-column table O(n^3 log n): ~1.9 s for 350 columns.
-        // Generous bound so it holds on a slow CI agent; the fixed code takes a few milliseconds.
-        var tableView = new TableView();
-        var collection = new TableViewColumnsCollection(tableView);
-
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        for (var i = 0; i < 350; i++)
+        // Add, which made building an n-column table O(n^3 log n).
+        // A SCALE-FREE assertion, not a wall-clock budget: an absolute bound is a property of the
+        // machine (an x64 Debug AppContainer took 794 ms for 350 columns on a dev box where the fixed
+        // code is still fast in shape), so it fails on a slow agent and passes a slow regression on a
+        // fast one. Doubling n costs ~2-3.5x when the cost is linear-ish and ~8x when it is cubic
+        // (measured 7.98x unfixed, 2.6-3.5x fixed); 6 sits between 2^2 and 2^3, fitted to neither.
+        static long Build(int n)
         {
-            collection.Add(new TableViewTextColumn { Header = $"Column {i}" });
+            var collection = new TableViewColumnsCollection(new TableView());
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            for (var i = 0; i < n; i++)
+            {
+                collection.Add(new TableViewTextColumn { Header = $"Column {i}" });
+            }
+            stopwatch.Stop();
+            Assert.AreEqual(n, collection.Count);
+            return Math.Max(1, stopwatch.ElapsedMilliseconds);
         }
-        stopwatch.Stop();
 
-        Assert.AreEqual(350, collection.Count);
-        Assert.IsTrue(stopwatch.ElapsedMilliseconds < 500,
-            $"Adding 350 columns took {stopwatch.ElapsedMilliseconds} ms; expected well under 500 ms.");
+        Build(175); // warm the JIT so the first timed run is not charged for it
+        var half = Build(175);
+        var full = Build(350);
+        var ratio = (double)full / half;
+
+        Assert.IsTrue(ratio < 6,
+            $"Doubling the column count from 175 ({half} ms) to 350 ({full} ms) cost {ratio:0.00}x; "
+            + "a cubic column build costs ~8x.");
     }
 }

@@ -672,9 +672,9 @@ public partial class TableViewRow : ListViewItem
     { get; private set; }
 #endif
 
-    /// <inheritdoc/>
-    protected override AutomationPeer OnCreateAutomationPeer()
-    {
-        return new AutomationPeers.TableViewRowAutomationPeer(this);
-    }
+    // Datgel fork (DH-1879): v1.5.0 creates AutomationPeers.TableViewRowAutomationPeer here. This fork
+    // does not (as in 1.4.1.3): a UI Automation client sees a row as the item DATA peer the list peer
+    // creates, and a consumer that decides the row's answer there (Datgel Hub's
+    // HubGridRowItemAutomationPeer, DH-1450) must not have the container's peer change underneath it
+    // unmeasured. The v1.5.0 class is still compiled. Adopting it is DH-1880.
 }

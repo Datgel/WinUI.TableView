@@ -2,7 +2,7 @@ name: ci-build
 
 on:
   push:
-    branches: main
+    branches: [ main, 'ci/**' ]
     paths-ignore:
       - 'docs/**'
       - 'samples/**'
@@ -45,7 +45,7 @@ jobs:
                 
     - name: Run Tests
       run: |
-        tests\bin\x64\Release\net10.0-windows10.0.26100.0\WinUI.TableView.Tests.build.appxrecipe --logger:"console;verbosity=normal" /InIsolation
+        vstest.console.exe tests\bin\x64\Release\net10.0-windows10.0.26100.0\WinUI.TableView.Tests.build.appxrecipe --logger:"console;verbosity=normal" /InIsolation
  
     - name: Upload artifacts
       uses: actions/upload-artifact@v4

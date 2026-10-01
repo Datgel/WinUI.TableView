@@ -144,6 +144,9 @@ public class TableViewKeyboardNavigationTests
     {
         var tableView = new TableView
         {
+            // Exactly the three columns declared below; the default would add three generated ones, and the wrap
+            // test's "last column" would then not be the last (CI run 36832285874: landed on column 3 of 6).
+            AutoGenerateColumns = false,
             SelectionMode = ListViewSelectionMode.Extended,
             SelectionUnit = TableViewSelectionUnit.Cell,
         };

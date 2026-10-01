@@ -953,7 +953,7 @@ public partial class TableView : ListView
 
             do
             {
-                newSlot = GetNextSlot(newSlot, shiftKey, e.Key is VirtualKey.Enter);
+                newSlot = GetNextSlot(newSlot, shiftKey, e.Key is VirtualKey.Enter && EnterKeyNavigation is TableViewEnterKeyNavigation.Down);
 
             } while (isEditing && Columns[newSlot.Column].IsReadOnly);
 
@@ -961,7 +961,7 @@ public partial class TableView : ListView
             {
                 if (!EndCellEditing(TableViewEditAction.Commit, currentCell)) return;
 
-                if (CurrentCellSlot == newSlot || GetCellFromSlot(newSlot) is not { } nextCell || !nextCell.BeginCellEditing(e))
+                if (!ContinueEditingOnNavigation || CurrentCellSlot == newSlot || GetCellFromSlot(newSlot) is not { } nextCell || !nextCell.BeginCellEditing(e))
                 {
                     SetIsEditing(false);
                 }
@@ -974,29 +974,7 @@ public partial class TableView : ListView
         else if ((e.Key is VirtualKey.Left or VirtualKey.Right or VirtualKey.Up or VirtualKey.Down)
                  && !IsEditing)
         {
-            var row = (LastSelectionUnit is TableViewSelectionUnit.Row ? CurrentRowIndex : CurrentCellSlot?.Row) ?? -1;
-            var column = CurrentCellSlot?.Column ?? -1;
-
-            if (row == -1 && column == -1)
-            {
-                row = column = 0;
-            }
-            else if (e.Key is VirtualKey.Left or VirtualKey.Right)
-            {
-                column = e.Key is VirtualKey.Left ? ctrlKey ? 0 : column - 1 : ctrlKey ? Columns.VisibleColumns.Count - 1 : column + 1;
-                if (column >= Columns.VisibleColumns.Count)
-                {
-                    column = 0;
-                    row++;
-                }
-            }
-            else
-            {
-                row = e.Key == VirtualKey.Up ? ctrlKey ? 0 : row - 1 : ctrlKey ? Items.Count - 1 : row + 1;
-            }
-
-            var newSlot = new TableViewCellSlot(row, column);
-            MakeSelection(newSlot, shiftKey);
+            MakeSelection(GetArrowSlot(e.Key, ctrlKey), shiftKey);
             e.Handled = true;
         }
         else if (e.Key is VirtualKey.Home or VirtualKey.End)
@@ -1033,6 +1011,68 @@ public partial class TableView : ListView
         var headerHeight = HeaderRowHeight is not double.NaN ? HeaderRowHeight : HeaderRowMinHeight;
         var availableHeight = ActualHeight - headerHeight;
         return (int)Math.Floor(availableHeight / rowHeight);
+    }
+
+    /// <summary>
+    /// Commits the edit in progress, if any, and ends the edit session, leaving the edited cell current.
+    /// </summary>
+    /// <remarks>
+    /// This is what Tab or Enter do to the cell being left, without moving. <see cref="CellEditEnding"/> is
+    /// raised, and a handler that cancels it keeps the edit open.
+    /// </remarks>
+    /// <returns><see langword="true"/> if no edit is in progress any more; <see langword="false"/> if the
+    /// commit was cancelled.</returns>
+    public bool CommitEdit()
+    {
+        if (!IsEditing)
+        {
+            return true;
+        }
+
+        if (CurrentCellSlot is { } slot && GetCellFromSlot(slot) is { } cell)
+        {
+            // Move focus to the cell BEFORE the editing element is torn down, as the Escape path does.
+            cell.Focus(FocusState.Programmatic);
+
+            if (!EndCellEditing(TableViewEditAction.Commit, cell))
+            {
+                return false;
+            }
+        }
+
+        SetIsEditing(false);
+        return true;
+    }
+
+    /// <summary>
+    /// Moves the current cell as the given navigation key would, when no edit is in progress.
+    /// </summary>
+    /// <remarks>
+    /// Supports the arrow keys, Tab and Enter (honouring <see cref="EnterKeyNavigation"/>). A caller that
+    /// handles a key inside a cell editor - for example an arrow key that should commit the edit and move,
+    /// as in a spreadsheet entry mode - calls <see cref="CommitEdit"/> and then this.
+    /// </remarks>
+    /// <returns><see langword="true"/> if the key was a supported navigation key and no edit is in progress.</returns>
+    public bool NavigateFromCurrentCell(VirtualKey key, bool shiftKey = false, bool ctrlKey = false)
+    {
+        if (IsEditing)
+        {
+            return false;
+        }
+
+        if (key is VirtualKey.Left or VirtualKey.Right or VirtualKey.Up or VirtualKey.Down)
+        {
+            MakeSelection(GetArrowSlot(key, ctrlKey), shiftKey);
+            return true;
+        }
+
+        if (key is VirtualKey.Tab or VirtualKey.Enter)
+        {
+            MakeSelection(GetNextSlot(CurrentCellSlot ?? new(), shiftKey, key is VirtualKey.Enter && EnterKeyNavigation is TableViewEnterKeyNavigation.Down), false);
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -1345,6 +1385,35 @@ public partial class TableView : ListView
     /// <summary>
     /// Gets the next cell slot based on the current slot and input keys.
     /// </summary>
+    /// <summary>
+    /// Gets the slot an arrow key moves the current cell to.
+    /// </summary>
+    private TableViewCellSlot GetArrowSlot(VirtualKey key, bool ctrlKey)
+    {
+        var row = (LastSelectionUnit is TableViewSelectionUnit.Row ? CurrentRowIndex : CurrentCellSlot?.Row) ?? -1;
+        var column = CurrentCellSlot?.Column ?? -1;
+
+        if (row == -1 && column == -1)
+        {
+            row = column = 0;
+        }
+        else if (key is VirtualKey.Left or VirtualKey.Right)
+        {
+            column = key is VirtualKey.Left ? ctrlKey ? 0 : column - 1 : ctrlKey ? Columns.VisibleColumns.Count - 1 : column + 1;
+            if (column >= Columns.VisibleColumns.Count)
+            {
+                column = 0;
+                row++;
+            }
+        }
+        else
+        {
+            row = key == VirtualKey.Up ? ctrlKey ? 0 : row - 1 : ctrlKey ? Items.Count - 1 : row + 1;
+        }
+
+        return new TableViewCellSlot(row, column);
+    }
+
     private TableViewCellSlot GetNextSlot(TableViewCellSlot? currentSlot, bool isShiftKeyDown, bool isEnterKey)
     {
         var rows = Items.Count;

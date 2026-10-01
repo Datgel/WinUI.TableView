@@ -37,7 +37,7 @@ public partial class TableViewAutomationPeer : ListViewAutomationPeer, IGridProv
     /// <inheritdoc/>
     protected override string GetLocalizedControlTypeCore()
     {
-        return TableViewLocalizedStrings.TableViewControlType;
+        return "table view";
     }
 
     /// <inheritdoc/>

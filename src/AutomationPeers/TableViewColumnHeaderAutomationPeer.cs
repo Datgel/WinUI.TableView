@@ -38,7 +38,7 @@ public partial class TableViewColumnHeaderAutomationPeer : FrameworkElementAutom
     /// <inheritdoc/>
     protected override string GetLocalizedControlTypeCore()
     {
-        return TableViewLocalizedStrings.ColumnHeaderControlType;
+        return "column header";
     }
 
     /// <inheritdoc/>

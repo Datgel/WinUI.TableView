@@ -134,6 +134,67 @@ public class TableViewKeyboardNavigationTests
         Assert.IsFalse(tableView.IsEditing);
     }
 
+    [UITestMethod]
+    public async Task Enter_while_editing_edits_the_next_cell_by_default()
+    {
+        var tableView = await CreateTableViewAsync();
+        Assert.IsTrue(await tableView.BeginEditAsync(new TableViewCellSlot(0, 0)));
+
+        Assert.IsTrue(tableView.HandleTabOrEnter(VirtualKey.Enter, false, CurrentCell(tableView), new RoutedEventArgs()));
+
+        Assert.AreEqual(new TableViewCellSlot(1, 0), tableView.CurrentCellSlot);
+        Assert.IsTrue(tableView.IsEditing);
+    }
+
+    [UITestMethod]
+    public async Task Enter_while_editing_commits_and_only_selects_the_cell_to_the_right_when_not_continuing()
+    {
+        var tableView = await CreateTableViewAsync();
+        tableView.EnterKeyNavigation = TableViewEnterKeyNavigation.Right;
+        tableView.ContinueEditingOnNavigation = false;
+        var ended = new List<TableViewEditAction>();
+        tableView.CellEditEnded += (_, e) => ended.Add(e.EditAction);
+        Assert.IsTrue(await tableView.BeginEditAsync(new TableViewCellSlot(0, 0)));
+
+        Assert.IsTrue(tableView.HandleTabOrEnter(VirtualKey.Enter, false, CurrentCell(tableView), new RoutedEventArgs()));
+
+        Assert.AreEqual(new TableViewCellSlot(0, 1), tableView.CurrentCellSlot);
+        Assert.IsFalse(tableView.IsEditing);
+        CollectionAssert.AreEqual(new[] { TableViewEditAction.Commit }, ended);
+    }
+
+    [UITestMethod]
+    public async Task Tab_while_editing_only_selects_the_next_cell_when_not_continuing()
+    {
+        var tableView = await CreateTableViewAsync();
+        tableView.ContinueEditingOnNavigation = false;
+        Assert.IsTrue(await tableView.BeginEditAsync(new TableViewCellSlot(1, 2)));
+
+        Assert.IsTrue(tableView.HandleTabOrEnter(VirtualKey.Tab, false, CurrentCell(tableView), new RoutedEventArgs()));
+
+        Assert.AreEqual(new TableViewCellSlot(2, 0), tableView.CurrentCellSlot);
+        Assert.IsFalse(tableView.IsEditing);
+    }
+
+    [UITestMethod]
+    public async Task Enter_while_editing_moves_nothing_when_the_commit_is_cancelled()
+    {
+        var tableView = await CreateTableViewAsync();
+        var slot = new TableViewCellSlot(0, 0);
+        Assert.IsTrue(await tableView.BeginEditAsync(slot));
+        tableView.CellEditEnding += (_, e) => e.Cancel = true;
+
+        Assert.IsFalse(tableView.HandleTabOrEnter(VirtualKey.Enter, false, CurrentCell(tableView), new RoutedEventArgs()));
+
+        Assert.AreEqual(slot, tableView.CurrentCellSlot);
+        Assert.IsTrue(tableView.IsEditing);
+    }
+
+    private static TableViewCell? CurrentCell(TableView tableView)
+    {
+        return tableView.CurrentCellSlot is { } slot ? tableView.GetCellFromSlot(slot) : null;
+    }
+
     private static async Task MakeCurrentAsync(TableView tableView, TableViewCellSlot slot)
     {
         tableView.MakeSelection(slot, false);

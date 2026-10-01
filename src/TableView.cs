@@ -947,29 +947,8 @@ public partial class TableView : ListView
         // Handle navigation keys
         else if (e.Key is VirtualKey.Tab or VirtualKey.Enter)
         {
-            var isEditing = IsEditing;
-
-            var newSlot = CurrentCellSlot ?? new();
-
-            do
-            {
-                newSlot = GetNextSlot(newSlot, shiftKey, e.Key is VirtualKey.Enter && EnterKeyNavigation is TableViewEnterKeyNavigation.Down);
-
-            } while (isEditing && Columns[newSlot.Column].IsReadOnly);
-
-            if (isEditing && currentCell is not null)
-            {
-                if (!EndCellEditing(TableViewEditAction.Commit, currentCell)) return;
-
-                if (!ContinueEditingOnNavigation || CurrentCellSlot == newSlot || GetCellFromSlot(newSlot) is not { } nextCell || !nextCell.BeginCellEditing(e))
-                {
-                    SetIsEditing(false);
-                }
-            }
-
-            MakeSelection(newSlot, false);
-
-            e.Handled = true;
+            // A cancelled commit leaves the key unhandled, as before the move was factored out.
+            e.Handled = HandleTabOrEnter(e.Key, shiftKey, currentCell, e);
         }
         else if ((e.Key is VirtualKey.Left or VirtualKey.Right or VirtualKey.Up or VirtualKey.Down)
                  && !IsEditing)
@@ -1011,6 +990,37 @@ public partial class TableView : ListView
         var headerHeight = HeaderRowHeight is not double.NaN ? HeaderRowHeight : HeaderRowMinHeight;
         var availableHeight = ActualHeight - headerHeight;
         return (int)Math.Floor(availableHeight / rowHeight);
+    }
+
+    /// <summary>
+    /// Moves the current cell as Tab or Enter does. While editing, the edit is committed first; the cell
+    /// moved to is then edited too unless <see cref="ContinueEditingOnNavigation"/> is <see langword="false"/>.
+    /// </summary>
+    /// <returns><see langword="false"/> if committing the edit was cancelled, so nothing moved.</returns>
+    internal bool HandleTabOrEnter(VirtualKey key, bool shiftKey, TableViewCell? currentCell, RoutedEventArgs editingArgs)
+    {
+        var isEditing = IsEditing;
+
+        var newSlot = CurrentCellSlot ?? new();
+
+        do
+        {
+            newSlot = GetNextSlot(newSlot, shiftKey, key is VirtualKey.Enter && EnterKeyNavigation is TableViewEnterKeyNavigation.Down);
+
+        } while (isEditing && Columns[newSlot.Column].IsReadOnly);
+
+        if (isEditing && currentCell is not null)
+        {
+            if (!EndCellEditing(TableViewEditAction.Commit, currentCell)) return false;
+
+            if (!ContinueEditingOnNavigation || CurrentCellSlot == newSlot || GetCellFromSlot(newSlot) is not { } nextCell || !nextCell.BeginCellEditing(editingArgs))
+            {
+                SetIsEditing(false);
+            }
+        }
+
+        MakeSelection(newSlot, false);
+        return true;
     }
 
     /// <summary>
@@ -1383,9 +1393,6 @@ public partial class TableView : ListView
     }
 
     /// <summary>
-    /// Gets the next cell slot based on the current slot and input keys.
-    /// </summary>
-    /// <summary>
     /// Gets the slot an arrow key moves the current cell to.
     /// </summary>
     private TableViewCellSlot GetArrowSlot(VirtualKey key, bool ctrlKey)
@@ -1414,6 +1421,9 @@ public partial class TableView : ListView
         return new TableViewCellSlot(row, column);
     }
 
+    /// <summary>
+    /// Gets the next cell slot based on the current slot and input keys.
+    /// </summary>
     private TableViewCellSlot GetNextSlot(TableViewCellSlot? currentSlot, bool isShiftKeyDown, bool isEnterKey)
     {
         var rows = Items.Count;

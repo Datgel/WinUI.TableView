@@ -209,6 +209,16 @@ public partial class TableView
     public static readonly DependencyProperty UseRightClickForColumnFilterProperty = DependencyProperty.Register(nameof(UseRightClickForColumnFilter), typeof(bool), typeof(TableView), new PropertyMetadata(false));
 
     /// <summary>
+    /// Identifies the EnterKeyNavigation dependency property.
+    /// </summary>
+    public static readonly DependencyProperty EnterKeyNavigationProperty = DependencyProperty.Register(nameof(EnterKeyNavigation), typeof(TableViewEnterKeyNavigation), typeof(TableView), new PropertyMetadata(TableViewEnterKeyNavigation.Down));
+
+    /// <summary>
+    /// Identifies the ContinueEditingOnNavigation dependency property.
+    /// </summary>
+    public static readonly DependencyProperty ContinueEditingOnNavigationProperty = DependencyProperty.Register(nameof(ContinueEditingOnNavigation), typeof(bool), typeof(TableView), new PropertyMetadata(true));
+
+    /// <summary>
     /// Identifies the VerticalOffset dependency property.
     /// </summary>
     public static readonly DependencyProperty VerticalOffsetProperty = DependencyProperty.Register(nameof(VerticalOffset), typeof(double), typeof(TableView), new PropertyMetadata(0d));
@@ -354,6 +364,27 @@ public partial class TableView
     {
         get => (bool)GetValue(UseRightClickForColumnFilterProperty);
         set => SetValue(UseRightClickForColumnFilterProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets where the Enter key moves the current cell. The default, <see cref="TableViewEnterKeyNavigation.Down"/>,
+    /// moves to the cell below; <see cref="TableViewEnterKeyNavigation.Right"/> moves to the next cell to the right.
+    /// </summary>
+    public TableViewEnterKeyNavigation EnterKeyNavigation
+    {
+        get => (TableViewEnterKeyNavigation)GetValue(EnterKeyNavigationProperty);
+        set => SetValue(EnterKeyNavigationProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether Tab or Enter pressed while editing a cell begins editing the
+    /// cell it moves to. The default is <see langword="true"/>. When <see langword="false"/>, the edit is
+    /// committed and the next cell is only made current and selected, as in a spreadsheet.
+    /// </summary>
+    public bool ContinueEditingOnNavigation
+    {
+        get => (bool)GetValue(ContinueEditingOnNavigationProperty);
+        set => SetValue(ContinueEditingOnNavigationProperty, value);
     }
 
     /// <summary>

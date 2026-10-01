@@ -50,6 +50,7 @@ public partial class TableView : ListView
     private TableViewCellSlotRange? _lastDragSelectionCellRange;
     private ItemIndexRange? _lastDragSelectionRowRange;
     private bool _cellStateDispatchPending;
+    private (TableViewCellSlot Slot, TaskCompletionSource<bool> Completion)? _pendingEdit;
     private readonly HashSet<int> _pendingCellStateRows = [];
     private TableViewColumn? _resizingColumn;
     private double _resizingOriginalWidth;
@@ -946,56 +947,13 @@ public partial class TableView : ListView
         // Handle navigation keys
         else if (e.Key is VirtualKey.Tab or VirtualKey.Enter)
         {
-            var isEditing = IsEditing;
-
-            var newSlot = CurrentCellSlot ?? new();
-
-            do
-            {
-                newSlot = GetNextSlot(newSlot, shiftKey, e.Key is VirtualKey.Enter);
-
-            } while (isEditing && Columns[newSlot.Column].IsReadOnly);
-
-            if (isEditing && currentCell is not null)
-            {
-                if (!EndCellEditing(TableViewEditAction.Commit, currentCell)) return;
-
-                if (CurrentCellSlot == newSlot || GetCellFromSlot(newSlot) is not { } nextCell || !nextCell.BeginCellEditing(e))
-                {
-                    SetIsEditing(false);
-                }
-            }
-
-            MakeSelection(newSlot, false);
-
-            e.Handled = true;
+            // A cancelled commit leaves the key unhandled, as before the move was factored out.
+            e.Handled = HandleTabOrEnter(e.Key, shiftKey, currentCell, e);
         }
         else if ((e.Key is VirtualKey.Left or VirtualKey.Right or VirtualKey.Up or VirtualKey.Down)
                  && !IsEditing)
         {
-            var row = (LastSelectionUnit is TableViewSelectionUnit.Row ? CurrentRowIndex : CurrentCellSlot?.Row) ?? -1;
-            var column = CurrentCellSlot?.Column ?? -1;
-
-            if (row == -1 && column == -1)
-            {
-                row = column = 0;
-            }
-            else if (e.Key is VirtualKey.Left or VirtualKey.Right)
-            {
-                column = e.Key is VirtualKey.Left ? ctrlKey ? 0 : column - 1 : ctrlKey ? Columns.VisibleColumns.Count - 1 : column + 1;
-                if (column >= Columns.VisibleColumns.Count)
-                {
-                    column = 0;
-                    row++;
-                }
-            }
-            else
-            {
-                row = e.Key == VirtualKey.Up ? ctrlKey ? 0 : row - 1 : ctrlKey ? Items.Count - 1 : row + 1;
-            }
-
-            var newSlot = new TableViewCellSlot(row, column);
-            MakeSelection(newSlot, shiftKey);
+            MakeSelection(GetArrowSlot(e.Key, ctrlKey), shiftKey);
             e.Handled = true;
         }
         else if (e.Key is VirtualKey.Home or VirtualKey.End)
@@ -1032,6 +990,184 @@ public partial class TableView : ListView
         var headerHeight = HeaderRowHeight is not double.NaN ? HeaderRowHeight : HeaderRowMinHeight;
         var availableHeight = ActualHeight - headerHeight;
         return (int)Math.Floor(availableHeight / rowHeight);
+    }
+
+    /// <summary>
+    /// Moves the current cell as Tab or Enter does. While editing, the edit is committed first; the cell
+    /// moved to is then edited too unless <see cref="ContinueEditingOnNavigation"/> is <see langword="false"/>.
+    /// </summary>
+    /// <returns><see langword="false"/> if committing the edit was cancelled, so nothing moved.</returns>
+    internal bool HandleTabOrEnter(VirtualKey key, bool shiftKey, TableViewCell? currentCell, RoutedEventArgs editingArgs)
+    {
+        var isEditing = IsEditing;
+
+        var newSlot = CurrentCellSlot ?? new();
+
+        do
+        {
+            newSlot = GetNextSlot(newSlot, shiftKey, key is VirtualKey.Enter && EnterKeyNavigation is TableViewEnterKeyNavigation.Down);
+
+        } while (isEditing && Columns[newSlot.Column].IsReadOnly);
+
+        if (isEditing && currentCell is not null)
+        {
+            if (!EndCellEditing(TableViewEditAction.Commit, currentCell)) return false;
+
+            if (!ContinueEditingOnNavigation || CurrentCellSlot == newSlot || GetCellFromSlot(newSlot) is not { } nextCell || !nextCell.BeginCellEditing(editingArgs))
+            {
+                SetIsEditing(false);
+            }
+        }
+
+        MakeSelection(newSlot, false);
+        return true;
+    }
+
+    /// <summary>
+    /// Commits the edit in progress, if any, and ends the edit session, leaving the edited cell current.
+    /// </summary>
+    /// <remarks>
+    /// This is what Tab or Enter do to the cell being left, without moving. <see cref="CellEditEnding"/> is
+    /// raised, and a handler that cancels it keeps the edit open.
+    /// </remarks>
+    /// <returns><see langword="true"/> if no edit is in progress any more; <see langword="false"/> if the
+    /// commit was cancelled.</returns>
+    public bool CommitEdit()
+    {
+        if (!IsEditing)
+        {
+            return true;
+        }
+
+        if (CurrentCellSlot is { } slot && GetCellFromSlot(slot) is { } cell)
+        {
+            // Move focus to the cell BEFORE the editing element is torn down, as the Escape path does.
+            cell.Focus(FocusState.Programmatic);
+
+            if (!EndCellEditing(TableViewEditAction.Commit, cell))
+            {
+                return false;
+            }
+        }
+
+        SetIsEditing(false);
+        return true;
+    }
+
+    /// <summary>
+    /// Moves the current cell as the given navigation key would, when no edit is in progress.
+    /// </summary>
+    /// <remarks>
+    /// Supports the arrow keys, Tab and Enter (honouring <see cref="EnterKeyNavigation"/>). A caller that
+    /// handles a key inside a cell editor - for example an arrow key that should commit the edit and move,
+    /// as in a spreadsheet entry mode - calls <see cref="CommitEdit"/> and then this.
+    /// </remarks>
+    /// <returns><see langword="true"/> if the key was a supported navigation key and no edit is in progress.</returns>
+    public bool NavigateFromCurrentCell(VirtualKey key, bool shiftKey = false, bool ctrlKey = false)
+    {
+        if (IsEditing)
+        {
+            return false;
+        }
+
+        if (key is VirtualKey.Left or VirtualKey.Right or VirtualKey.Up or VirtualKey.Down)
+        {
+            MakeSelection(GetArrowSlot(key, ctrlKey), shiftKey);
+            return true;
+        }
+
+        if (key is VirtualKey.Tab or VirtualKey.Enter)
+        {
+            MakeSelection(GetNextSlot(CurrentCellSlot ?? new(), shiftKey, key is VirtualKey.Enter && EnterKeyNavigation is TableViewEnterKeyNavigation.Down), false);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Makes the cell at <paramref name="slot"/> the current cell and begins editing it, as pressing F2 on
+    /// that cell does.
+    /// </summary>
+    /// <remarks>
+    /// <para>This is for a cell that exposes an affordance of its own while it is not being edited - a
+    /// drop-down arrow, a picker button - and needs a single click on that affordance to open the editor.
+    /// The control starts an edit only from a double tap and from F2, and a single click is not a gesture it
+    /// can infer.</para>
+    /// <para>The sequence matches the existing gestures:</para>
+    /// <list type="number">
+    /// <item>If another cell is being edited, that edit is committed first, as tapping or tabbing to a
+    /// different cell does. If committing is cancelled, no edit begins.</item>
+    /// <item>The cell becomes the <see cref="CurrentCellSlot"/> and is selected, as keyboard navigation to
+    /// it does, and is scrolled into view and focused.</item>
+    /// <item>The edit then begins. <see cref="BeginningEdit"/> is raised, and a handler that cancels it is
+    /// honoured.</item>
+    /// </list>
+    /// <para>No edit begins for a read-only table, column or cell, for a column that draws itself through
+    /// <see cref="TableViewColumn.UseSingleElement"/> (a double tap does not begin one either), or when the
+    /// cell is already being edited.</para>
+    /// </remarks>
+    /// <param name="slot">The cell to edit.</param>
+    /// <returns>A task whose result is <see langword="true"/> if the cell entered edit mode; otherwise
+    /// <see langword="false"/>.</returns>
+    public async Task<bool> BeginEditAsync(TableViewCellSlot slot)
+    {
+        if (IsReadOnly || !slot.IsValid(this))
+        {
+            return false;
+        }
+
+        if (IsEditing)
+        {
+            if (CurrentCellSlot == slot)
+            {
+                return false;
+            }
+
+            if (CurrentCellSlot is { } currentSlot
+                && GetCellFromSlot(currentSlot) is { } currentCell
+                && !EndCellEditing(TableViewEditAction.Commit, currentCell))
+            {
+                return false;
+            }
+
+            SetIsEditing(false);
+        }
+
+        // A later request supersedes an earlier one that has not started yet.
+        _pendingEdit?.Completion.TrySetResult(false);
+        _pendingEdit = null;
+
+        if (CurrentCellSlot == slot)
+        {
+            // Already current, so OnCurrentCellChanged will not run. A realized cell is edited directly,
+            // as F2 does, so the call completes synchronously; only a cell scrolled out of view waits.
+            return TryBeginEdit(GetCellFromSlot(slot) ?? await ScrollCellIntoView(slot));
+        }
+
+        var pending = new TaskCompletionSource<bool>();
+        _pendingEdit = (slot, pending);
+
+        MakeSelection(slot, false);
+
+        if (CurrentCellSlot != slot)
+        {
+            // Selection declined to make the cell current, so OnCurrentCellChanged will not start the edit.
+            _pendingEdit = null;
+            return false;
+        }
+
+        return await pending.Task;
+    }
+
+    /// <summary>
+    /// Begins editing <paramref name="cell"/> if the same conditions a double tap applies allow it.
+    /// </summary>
+    private bool TryBeginEdit(TableViewCell? cell)
+    {
+        return cell is { IsReadOnly: false, Column.UseSingleElement: false }
+            && !IsEditing
+            && cell.BeginCellEditing(new RoutedEventArgs());
     }
 
     /// <summary>
@@ -1254,6 +1390,35 @@ public partial class TableView : ListView
             var xOffset = HorizontalOffset + (mouseWheelDelta / 4.0);
             SetValue(HorizontalOffsetProperty, Math.Clamp(xOffset, 0, _scrollViewer.ScrollableWidth));
         }
+    }
+
+    /// <summary>
+    /// Gets the slot an arrow key moves the current cell to.
+    /// </summary>
+    private TableViewCellSlot GetArrowSlot(VirtualKey key, bool ctrlKey)
+    {
+        var row = (LastSelectionUnit is TableViewSelectionUnit.Row ? CurrentRowIndex : CurrentCellSlot?.Row) ?? -1;
+        var column = CurrentCellSlot?.Column ?? -1;
+
+        if (row == -1 && column == -1)
+        {
+            row = column = 0;
+        }
+        else if (key is VirtualKey.Left or VirtualKey.Right)
+        {
+            column = key is VirtualKey.Left ? ctrlKey ? 0 : column - 1 : ctrlKey ? Columns.VisibleColumns.Count - 1 : column + 1;
+            if (column >= Columns.VisibleColumns.Count)
+            {
+                column = 0;
+                row++;
+            }
+        }
+        else
+        {
+            row = key == VirtualKey.Up ? ctrlKey ? 0 : row - 1 : ctrlKey ? Items.Count - 1 : row + 1;
+        }
+
+        return new TableViewCellSlot(row, column);
     }
 
     /// <summary>
@@ -2181,6 +2346,15 @@ public partial class TableView : ListView
             var cell = await ScrollCellIntoView(newSlot.Value);
             cell?.ApplyCurrentCellState();
             cell?.Focus(FocusState.Programmatic);
+
+            // A BeginEditAsync call that moved the current cell starts its edit here, once the cell has
+            // been scrolled into view and focused, so that the editing element is the last thing to take
+            // focus rather than racing the Focus call above.
+            if (_pendingEdit is { } pending && pending.Slot == newSlot.Value)
+            {
+                _pendingEdit = null;
+                pending.Completion.TrySetResult(CurrentCellSlot == newSlot && TryBeginEdit(cell));
+            }
         }
     }
 

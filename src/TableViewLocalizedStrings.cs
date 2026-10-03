@@ -160,6 +160,6 @@ internal partial class TableViewLocalizedStrings
     /// </summary>
     private static string Resolve(string key, string resourceValue)
     {
-        return TableViewLocalization.TryResolve(key) is { Length: > 0 } hostValue ? hostValue : resourceValue;
+        return resourceValue; // NEGATIVE CONTROL: host resolver ignored
     }
 }

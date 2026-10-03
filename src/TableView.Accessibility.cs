@@ -13,7 +13,11 @@ namespace WinUI.TableView;
 /// <para><b>Datgel fork (DH-1445 re-cut onto v1.5.0, DH-1879).</b> v1.5.0 added its own peers under
 /// <c>WinUI.TableView.AutomationPeers</c>; this fork keeps the DH-1445 peers under
 /// <c>WinUI.TableView.Automation</c> as the ones the controls CREATE, so a consumer's automation tree
-/// is unchanged from 1.4.1.3. The v1.5.0 peer classes are still compiled (public, unused).</para>
+/// is unchanged from 1.4.1.3. The v1.5.0 peer classes are still compiled (public).</para>
+/// <para><b>Except the column header (DH-1944).</b> Once v1.5.0's peers took their control types and row
+/// names from <see cref="TableViewLocalizedStrings"/> instead of English literals, its column-header peer
+/// became a superset of the DH-1445 one (Invoke to cycle the sort, sort/filter hints) and replaced it. The
+/// cell, table, row and row-header behaviour is unchanged.</para>
 /// <para>The table's own peer is created on the Windows App SDK targets only, as in 1.4.1.3: on Uno a
 /// list peer's base calls, compiled against this package's Uno reference, bind non-virtually and can
 /// skip the runtime's own list overrides, so an Uno app supplies its own table peer.</para>

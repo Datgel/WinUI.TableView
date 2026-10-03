@@ -414,13 +414,15 @@ public class TableViewAutomationPeerTests
     }
 
     [UITestMethod]
-    public void TableViewColumnHeader_OnCreateAutomationPeer_ReturnsTheForksHeaderPeer()
+    public void TableViewColumnHeader_OnCreateAutomationPeer_ReturnsTheV150HeaderPeer()
     {
+        // DH-1944: once its localized control type stopped being an English literal, v1.5.0's header
+        // peer replaced the DH-1445 one.
         var header = new TableViewColumnHeader();
 
         var peer = FrameworkElementAutomationPeer.CreatePeerForElement(header);
 
-        Assert.IsInstanceOfType(peer, typeof(WinUI.TableView.Automation.TableViewColumnHeaderAutomationPeer));
+        Assert.IsInstanceOfType(peer, typeof(TableViewColumnHeaderAutomationPeer));
     }
 
     [UITestMethod]

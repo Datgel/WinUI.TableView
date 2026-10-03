@@ -133,23 +133,6 @@ internal partial class TableViewLocalizedStrings
         }
     }
 
-    /// <summary>
-    /// Every key this class resolves: the resource names in <c>WinUI.TableView.resw</c>, which are
-    /// also the keys handed to <see cref="TableViewLocalization.StringResolver"/>.
-    /// </summary>
-    internal static readonly string[] AllKeys =
-    [
-        nameof(BlankFilterValue), nameof(Cancel), nameof(ClearFilter), nameof(ClearSorting), nameof(Copy),
-        nameof(CopyCommandDescription), nameof(Paste), nameof(PasteCommandDescription), nameof(CopyWithHeaders),
-        nameof(CopyWithHeadersCommandDescription), nameof(DatePickerPlaceholder), nameof(DeselectAll),
-        nameof(DeselectAllCommandDescription), nameof(ExportAll), nameof(ExportSelected), nameof(Ok),
-        nameof(SearchBoxPlaceholder), nameof(SelectAll), nameof(SelectAllCommandDescription),
-        nameof(SelectAllParenthesized), nameof(SortAscending), nameof(SortDescending), nameof(TimePickerPlaceholder),
-        nameof(Filtered), nameof(Group), nameof(Ungroup), nameof(UngroupAll), nameof(SortGroupsByCount),
-        nameof(SortGroupsByValue), nameof(TableViewControlType), nameof(ColumnHeaderControlType),
-        nameof(RowHeaderControlType), nameof(CellControlType), nameof(RowNumber), nameof(Row),
-    ];
-
     private static string _resourceRowNumber = "Row {0}";
 
     /// <summary>

@@ -31,7 +31,48 @@ public static class TableViewLocalization
     /// <summary>
     /// Gets every key the TableView asks <see cref="StringResolver"/> for.
     /// </summary>
-    public static IReadOnlyList<string> Keys => field ??= Array.AsReadOnly(TableViewLocalizedStrings.AllKeys);
+    /// <remarks>
+    /// Listed here by name rather than read off <see cref="TableViewLocalizedStrings"/>, so asking for the keys
+    /// does not load the library's resources (which needs a running app).
+    /// </remarks>
+    public static IReadOnlyList<string> Keys { get; } = Array.AsReadOnly(new[]
+    {
+        nameof(TableViewLocalizedStrings.BlankFilterValue),
+        nameof(TableViewLocalizedStrings.Cancel),
+        nameof(TableViewLocalizedStrings.ClearFilter),
+        nameof(TableViewLocalizedStrings.ClearSorting),
+        nameof(TableViewLocalizedStrings.Copy),
+        nameof(TableViewLocalizedStrings.CopyCommandDescription),
+        nameof(TableViewLocalizedStrings.Paste),
+        nameof(TableViewLocalizedStrings.PasteCommandDescription),
+        nameof(TableViewLocalizedStrings.CopyWithHeaders),
+        nameof(TableViewLocalizedStrings.CopyWithHeadersCommandDescription),
+        nameof(TableViewLocalizedStrings.DatePickerPlaceholder),
+        nameof(TableViewLocalizedStrings.DeselectAll),
+        nameof(TableViewLocalizedStrings.DeselectAllCommandDescription),
+        nameof(TableViewLocalizedStrings.ExportAll),
+        nameof(TableViewLocalizedStrings.ExportSelected),
+        nameof(TableViewLocalizedStrings.Ok),
+        nameof(TableViewLocalizedStrings.SearchBoxPlaceholder),
+        nameof(TableViewLocalizedStrings.SelectAll),
+        nameof(TableViewLocalizedStrings.SelectAllCommandDescription),
+        nameof(TableViewLocalizedStrings.SelectAllParenthesized),
+        nameof(TableViewLocalizedStrings.SortAscending),
+        nameof(TableViewLocalizedStrings.SortDescending),
+        nameof(TableViewLocalizedStrings.TimePickerPlaceholder),
+        nameof(TableViewLocalizedStrings.Filtered),
+        nameof(TableViewLocalizedStrings.Group),
+        nameof(TableViewLocalizedStrings.Ungroup),
+        nameof(TableViewLocalizedStrings.UngroupAll),
+        nameof(TableViewLocalizedStrings.SortGroupsByCount),
+        nameof(TableViewLocalizedStrings.SortGroupsByValue),
+        nameof(TableViewLocalizedStrings.TableViewControlType),
+        nameof(TableViewLocalizedStrings.ColumnHeaderControlType),
+        nameof(TableViewLocalizedStrings.RowHeaderControlType),
+        nameof(TableViewLocalizedStrings.CellControlType),
+        nameof(TableViewLocalizedStrings.RowNumber),
+        nameof(TableViewLocalizedStrings.Row),
+    });
 
     /// <summary>
     /// The host's value for <paramref name="key"/>, or <see langword="null"/> when there is no resolver,

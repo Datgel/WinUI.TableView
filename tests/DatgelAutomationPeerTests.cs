@@ -24,7 +24,7 @@ public class DatgelAutomationPeerTests
 
         var peer = PeerOf(header);
 
-        Assert.IsInstanceOfType<TableViewColumnHeaderAutomationPeer>(peer);
+        Assert.IsInstanceOfType<AutomationPeers.TableViewColumnHeaderAutomationPeer>(peer);
         Assert.AreEqual(AutomationControlType.HeaderItem, peer.GetAutomationControlType());
         Assert.AreEqual(nameof(TableViewColumnHeader), peer.GetClassName());
         Assert.AreEqual("Column 1", peer.GetName());
@@ -100,7 +100,7 @@ public class DatgelAutomationPeerTests
 
         var children = PeerOf(tableView).GetChildren();
 
-        Assert.IsFalse(children.OfType<TableViewColumnHeaderAutomationPeer>().Any());
+        Assert.IsFalse(children.OfType<AutomationPeers.TableViewColumnHeaderAutomationPeer>().Any());
         Assert.AreEqual(0, ((ITableProvider)PeerOf(tableView)).GetColumnHeaders().Length);
     }
 

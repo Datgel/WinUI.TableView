@@ -395,7 +395,13 @@ public partial class TableViewColumnHeader : ContentControl
     }
 
     /// <inheritdoc/>
-    protected override AutomationPeer OnCreateAutomationPeer() => new TableViewColumnHeaderAutomationPeer(this);
+    /// <remarks>
+    /// Datgel fork (DH-1944): v1.5.0's own header peer, now that its localized control type comes from
+    /// <see cref="TableViewLocalizedStrings"/> (and so from <see cref="TableViewLocalization.StringResolver"/>)
+    /// rather than an English literal. It is the DH-1445 header peer plus Invoke (cycles the sort) and
+    /// sort/filter hints, with the same name rule: <c>AutomationProperties.Name</c> first, then the header text.
+    /// </remarks>
+    protected override AutomationPeer OnCreateAutomationPeer() => new AutomationPeers.TableViewColumnHeaderAutomationPeer(this);
 
     /// <summary>
     /// Handles changes to the SortDirection property.
@@ -797,7 +803,7 @@ public partial class TableViewColumnHeader : ContentControl
         }
     }
 
-    // Datgel fork (DH-1879): v1.5.0's own OnCreateAutomationPeer override stood here, returning
-    // AutomationPeers.TableViewColumnHeaderAutomationPeer. The DH-1445 override above (the
-    // WinUI.TableView.Automation peer) is the one this fork creates; see TableView.Accessibility.cs.
+    // Datgel fork (DH-1879): v1.5.0's own OnCreateAutomationPeer override stood here. Since DH-1944 the
+    // override above creates that same v1.5.0 peer (AutomationPeers.TableViewColumnHeaderAutomationPeer);
+    // see TableView.Accessibility.cs.
 }

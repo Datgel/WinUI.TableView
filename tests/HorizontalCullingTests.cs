@@ -37,6 +37,16 @@ public class HorizontalCullingTests
         Assert.AreEqual(expected, HorizontalCulling.IsInView(left, width, viewLeft, viewWidth, margin));
     }
 
+    [TestMethod]
+    [DataRow(400, 0, 400, DisplayName = "first pass: the table has no width yet")]
+    [DataRow(1600, 400, 1600, DisplayName = "the window grew: the table still reports the old width")]
+    [DataRow(380, 400, 400, DisplayName = "the row is narrower than the table")]
+    [DataRow(double.PositiveInfinity, 400, 400, DisplayName = "an unbounded arrange width is ignored")]
+    public void ViewWidth_IsTheLargerOfTheArrangedAndTheTableWidth(double arranged, double table, double expected)
+    {
+        Assert.AreEqual(expected, HorizontalCulling.ViewWidth(arranged, table));
+    }
+
     [UITestMethod]
     public async Task OffscreenHeadersAndCells_AreHidden_AndTheVisibleOnesAreNot()
     {
@@ -66,6 +76,22 @@ public class HorizontalCullingTests
         Assert.IsFalse(HorizontalCulling.IsCulled(cells.Children[ColumnCount - 1]), "the last cell has scrolled on");
         Assert.AreEqual(1d, cells.Children[ColumnCount - 1].Opacity, "a cell back in view gets its own opacity back");
         Assert.AreEqual(widthBefore, cells.ActualWidth, 0.01, "culling never changes layout");
+    }
+
+    [UITestMethod]
+    public async Task WideningTheTable_ShowsTheColumnsThatComeIntoView()
+    {
+        var tableView = await CreateTableViewAsync();
+        var (headers, cells) = Panels(tableView);
+        Assert.IsTrue(HorizontalCulling.IsCulled(cells.Children[10]), "Precondition: column 10 is off screen at 400 DIPs");
+
+        tableView.Width = 1600;
+        tableView.UpdateLayout();
+
+        Assert.IsFalse(HorizontalCulling.IsCulled(cells.Children[10]), "column 10 is on screen once the table is 1,600 DIPs wide");
+        Assert.IsFalse(HorizontalCulling.IsCulled(headers.Children[10]), "its header too");
+        AssertCulledExactlyOutsideTheViewport(tableView, headers, "headers after widening");
+        AssertCulledExactlyOutsideTheViewport(tableView, cells, "cells after widening");
     }
 
     [UITestMethod]

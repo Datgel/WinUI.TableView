@@ -1,3 +1,4 @@
+using System;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -37,6 +38,19 @@ internal static class HorizontalCulling
     /// </summary>
     internal static bool IsInView(double left, double width, double viewLeft, double viewWidth, double margin = Margin) =>
         left + width >= viewLeft - margin && left <= viewLeft + viewWidth + margin;
+
+    /// <summary>
+    /// The viewport width to cull against, from inside an <c>ArrangeOverride</c>: the larger of the size being
+    /// arranged (the row or header row spans the table's viewport) and the table's own width.
+    /// </summary>
+    /// <remarks>
+    /// Neither alone is safe. On the first pass the table's <c>ActualWidth</c> is still 0 (it is set after its children
+    /// are arranged), so nothing would ever be culled until something else re-arranged the row; and after the window
+    /// grows it is still the OLD width while the row is arranged at the new one, which would leave the columns that just
+    /// came into view drawn at opacity 0. Taking the larger can only ever draw too much, never too little.
+    /// </remarks>
+    internal static double ViewWidth(double arrangedWidth, double tableWidth) =>
+        Math.Max(double.IsFinite(arrangedWidth) ? arrangedWidth : 0, double.IsFinite(tableWidth) ? tableWidth : 0);
 
     /// <summary>Whether <paramref name="element"/> is currently hidden from the renderer by <see cref="Apply"/>.</summary>
     internal static bool IsCulled(UIElement element) => (bool)element.GetValue(IsCulledProperty);

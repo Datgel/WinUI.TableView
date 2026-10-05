@@ -99,6 +99,25 @@ public class HorizontalCullingTests
         Assert.IsTrue(cells.Children.All(c => c.Opacity == 1d), "every cell is drawn with culling off");
     }
 
+    [UITestMethod]
+    public async Task DetachItemsSource_KeepsTheRows_AndIgnoresLaterChangesToTheSource()
+    {
+        var source = new System.Collections.ObjectModel.ObservableCollection<CullingTestItem>
+        {
+            new() { Name = "Alpha" }, new() { Name = "Beta" }
+        };
+        var tableView = await CreateTableViewAsync(source);
+        Assert.AreEqual(2, tableView.FindDescendants().OfType<TableViewRow>().Count(), "Precondition: two realised rows");
+
+        tableView.DetachItemsSource();
+        source.Clear();
+        source.Add(new CullingTestItem { Name = "Gamma" });
+        tableView.UpdateLayout();
+
+        Assert.AreEqual(2, tableView.Items.Count, "a detached table keeps the rows it had");
+        Assert.AreEqual(2, tableView.FindDescendants().OfType<TableViewRow>().Count(), "and their containers");
+    }
+
     private static void AssertCulledExactlyOutsideTheViewport(TableView tableView, StackPanel panel, string what)
     {
         var wrong = new List<string>();
@@ -126,7 +145,7 @@ public class HorizontalCullingTests
         return (headers, cells);
     }
 
-    private static async Task<TableView> CreateTableViewAsync()
+    private static async Task<TableView> CreateTableViewAsync(System.Collections.IEnumerable? items = null)
     {
         var tableView = new TableView
         {
@@ -145,7 +164,7 @@ public class HorizontalCullingTests
             });
         }
 
-        tableView.ItemsSource = new[] { new CullingTestItem { Name = "Alpha" }, new CullingTestItem { Name = "Beta" } };
+        tableView.ItemsSource = items ?? new[] { new CullingTestItem { Name = "Alpha" }, new CullingTestItem { Name = "Beta" } };
         await UnitTestApp.Current.MainWindow.LoadTestContentAsync(tableView);
         tableView.UpdateLayout();
         return tableView;

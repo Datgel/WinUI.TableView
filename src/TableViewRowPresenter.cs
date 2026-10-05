@@ -11,6 +11,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Windows.Foundation;
 using WinUI.TableView.Extensions;
+using WinUI.TableView.Helpers;
 
 namespace WinUI.TableView;
 
@@ -181,6 +182,10 @@ public partial class TableViewRowPresenter : Control
                     };
             }
 
+            // DH-2215: in the panel's own coordinates the viewport starts at HorizontalOffset (the clip above starts
+            // there too), and the table's width bounds it from above (TableView.RefreshCulling re-runs this when the
+            // width changes: it is 0 on the first pass). Opacity only, so no layout is invalidated.
+            HorizontalCulling.Apply(_scrollableCellsPanel, TableView.HorizontalOffset, TableView.ActualWidth, TableView.CullsOffscreenColumns);
 
             // CellsHorizontalOffset is the boundary between the row header and the data cells — it's
             // positioned purely by HeaderColumn's width (see TableViewRowPresenter.xaml's ColumnDefinitions),

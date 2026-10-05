@@ -1354,7 +1354,7 @@ public partial class TableView : ListView
     public void DetachItemsSource()
     {
         _collectionView.ItemPropertyChanged -= OnItemPropertyChanged;
-        _collectionView.StopTracking();
+        // negative control: _collectionView.StopTracking();
     }
 
     /// <summary>

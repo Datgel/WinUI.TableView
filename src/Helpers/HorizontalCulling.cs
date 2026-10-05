@@ -20,6 +20,10 @@ namespace WinUI.TableView.Helpers;
 /// panel measures and arranges exactly as before, a column resize or a scroll re-runs the same arrange, and the cell
 /// is given back its own opacity (the local value is cleared) as soon as any part of it comes within
 /// <see cref="Margin"/> of the viewport.</para>
+/// <para>The viewport is the TABLE's width. A row is arranged as wide as all its cells, so its own arranged size says
+/// nothing about what is on screen; the table's <c>ActualWidth</c> is 0 on the first pass (nothing is culled then) and
+/// changes without re-arranging rows whose size did not, so <c>TableView.RefreshCulling</c> re-arranges the header row
+/// and every row whenever the table's width changes.</para>
 /// <para>WinAppSDK's compositor culls clipped content on its own, so there this saves little; it runs on every
 /// platform anyway, so there is one code path and the library's own (WinAppSDK) tests exercise it.</para>
 /// </remarks>
@@ -38,19 +42,6 @@ internal static class HorizontalCulling
     /// </summary>
     internal static bool IsInView(double left, double width, double viewLeft, double viewWidth, double margin = Margin) =>
         left + width >= viewLeft - margin && left <= viewLeft + viewWidth + margin;
-
-    /// <summary>
-    /// The viewport width to cull against, from inside an <c>ArrangeOverride</c>: the larger of the size being
-    /// arranged (the row or header row spans the table's viewport) and the table's own width.
-    /// </summary>
-    /// <remarks>
-    /// Neither alone is safe. On the first pass the table's <c>ActualWidth</c> is still 0 (it is set after its children
-    /// are arranged), so nothing would ever be culled until something else re-arranged the row; and after the window
-    /// grows it is still the OLD width while the row is arranged at the new one, which would leave the columns that just
-    /// came into view drawn at opacity 0. Taking the larger can only ever draw too much, never too little.
-    /// </remarks>
-    internal static double ViewWidth(double arrangedWidth, double tableWidth) =>
-        Math.Max(double.IsFinite(arrangedWidth) ? arrangedWidth : 0, double.IsFinite(tableWidth) ? tableWidth : 0);
 
     /// <summary>Whether <paramref name="element"/> is currently hidden from the renderer by <see cref="Apply"/>.</summary>
     internal static bool IsCulled(UIElement element) => (bool)element.GetValue(IsCulledProperty);

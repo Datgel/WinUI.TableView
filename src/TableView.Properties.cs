@@ -894,10 +894,19 @@ public partial class TableView
             if (_cullsOffscreenColumns == value)
                 return;
             _cullsOffscreenColumns = value;
-            _headerRow?.InvalidateArrange();
-            foreach (var row in _rows)
-                row?.RowPresenter?.InvalidateArrange();
+            RefreshCulling();
         }
+    }
+
+    /// <summary>
+    /// Re-runs the off-screen cull (DH-2215): it is applied when the header row and each row are arranged, against the
+    /// table's width, which is 0 on the first pass and changes without re-arranging a row whose own size did not.
+    /// </summary>
+    internal void RefreshCulling()
+    {
+        _headerRow?.InvalidateArrange();
+        foreach (var row in _rows)
+            row?.RowPresenter?.InvalidateArrange();
     }
 
     private bool _cullsOffscreenColumns = true;

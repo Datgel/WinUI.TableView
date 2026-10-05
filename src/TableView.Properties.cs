@@ -909,7 +909,7 @@ public partial class TableView
             row?.RowPresenter?.InvalidateArrange();
     }
 
-    private bool _cullsOffscreenColumns = true;
+    private bool _cullsOffscreenColumns = false;
 
     /// <summary>
     /// Gets the actual width of the row header.

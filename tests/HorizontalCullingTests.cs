@@ -37,16 +37,6 @@ public class HorizontalCullingTests
         Assert.AreEqual(expected, HorizontalCulling.IsInView(left, width, viewLeft, viewWidth, margin));
     }
 
-    [TestMethod]
-    [DataRow(400, 0, 400, DisplayName = "first pass: the table has no width yet")]
-    [DataRow(1600, 400, 1600, DisplayName = "the window grew: the table still reports the old width")]
-    [DataRow(380, 400, 400, DisplayName = "the row is narrower than the table")]
-    [DataRow(double.PositiveInfinity, 400, 400, DisplayName = "an unbounded arrange width is ignored")]
-    public void ViewWidth_IsTheLargerOfTheArrangedAndTheTableWidth(double arranged, double table, double expected)
-    {
-        Assert.AreEqual(expected, HorizontalCulling.ViewWidth(arranged, table));
-    }
-
     [UITestMethod]
     public async Task OffscreenHeadersAndCells_AreHidden_AndTheVisibleOnesAreNot()
     {

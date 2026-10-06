@@ -63,6 +63,9 @@ internal static class HorizontalCulling
             if (child is not FrameworkElement element)
                 continue;
 
+            if (element is TableViewCell { IsElementDeferred: true } cell)
+                RealizeIfInView(cell, viewLeft, viewWidth);
+
             var hide = cull && element.ActualWidth > 0 && !IsInView(element.ActualOffset.X, element.ActualWidth, viewLeft, viewWidth);
             if (hide)
                 culled++;
@@ -70,6 +73,36 @@ internal static class HorizontalCulling
         }
 
         return culled;
+    }
+
+    /// <summary>
+    /// Builds the element of every deferred cell in <paramref name="panel"/> that may no longer be deferred - for the
+    /// frozen cells panel, which never scrolls, so every cell in it is in view (Datgel DH-2231).
+    /// </summary>
+    internal static void RealizeAll(Panel? panel)
+    {
+        if (panel is null)
+            return;
+        foreach (var child in panel.Children)
+        {
+            if (child is TableViewCell { IsElementDeferred: true } cell)
+                cell.EnsureElement();
+        }
+    }
+
+    /// <summary>
+    /// Builds a deferred cell's element when it comes within <see cref="Margin"/> of the viewport, or when its column
+    /// may no longer be deferred (Datgel DH-2231). A viewport with no width yet (the table not laid out) builds
+    /// nothing: <c>TableView.RefreshCulling</c> re-arranges every row once the table has a width.
+    /// </summary>
+    private static void RealizeIfInView(TableViewCell cell, double viewLeft, double viewWidth)
+    {
+        var known = viewWidth > 0 && !double.IsNaN(viewLeft) && !double.IsNaN(viewWidth);
+        if (!cell.ShouldDeferElement()
+            || (known && cell.ActualWidth > 0 && IsInView(cell.ActualOffset.X, cell.ActualWidth, viewLeft, viewWidth)))
+        {
+            cell.EnsureElement();
+        }
     }
 
     /// <summary>Gives every child of <paramref name="panel"/> back to the renderer.</summary>

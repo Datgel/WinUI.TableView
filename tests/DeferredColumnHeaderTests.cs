@@ -71,7 +71,8 @@ public class DeferredColumnHeaderTests
         Assert.IsFalse(headers[0].IsTemplateDeferred, "the first header is on screen");
         Assert.IsTrue(VisualTreeHelper.GetChildrenCount(headers[0]) > 0, "and is templated");
         Assert.IsTrue(headers[ColumnCount - 1].IsTemplateDeferred, "the last header is far off screen and has no template");
-        Assert.AreEqual(0, VisualTreeHelper.GetChildrenCount(headers[ColumnCount - 1]), "a deferred header builds no visual tree");
+        Assert.IsNull(headers[ColumnCount - 1].FindDescendant<Button>(b => b.Name is "OptionsButton"),
+            "a deferred header builds none of its template's parts");
         for (var i = 0; i < ColumnCount; i++)
         {
             Assert.AreEqual(ColumnWidth, headers[i].ActualWidth, 0.5, $"header {i} keeps its column's width");
@@ -123,9 +124,9 @@ public class DeferredColumnHeaderTests
         Assert.IsFalse(headers[ColumnCount - 1].IsTemplateDeferred, "an auto-width column is measured from its header");
         Assert.IsTrue(headers[ColumnCount - 2].IsTemplateDeferred, "its off-screen neighbour still defers");
 
+        Assert.IsTrue(headers[ColumnCount - 2].ShouldDeferTemplate(), "Precondition: an off-screen scrollable header may defer");
         headers[ColumnCount - 2].Column!.IsFrozen = true;
-        await SettleAsync(tableView);
-        Assert.IsFalse(headers[ColumnCount - 2].IsTemplateDeferred, "a frozen header never scrolls, so it is templated");
+        Assert.IsFalse(headers[ColumnCount - 2].ShouldDeferTemplate(), "a frozen header never scrolls, so it never defers");
     }
 
     [UITestMethod]

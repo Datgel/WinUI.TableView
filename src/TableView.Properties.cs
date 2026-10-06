@@ -912,6 +912,28 @@ public partial class TableView
     private bool _cullsOffscreenColumns = true;
 
     /// <summary>
+    /// Gets or sets whether a cell scrolled out of the horizontal viewport defers building its element
+    /// (<see cref="TableViewColumn.GenerateElement"/>) until it comes into view (Datgel DH-2231). On by default.
+    /// The cell itself is still created, so it keeps its place, width, index and slot: selection, editing,
+    /// navigation and paste are unaffected. A frozen column, an auto-width column (its width is measured from its
+    /// cells) and a column with <see cref="TableViewColumn.AlwaysRealizeElement"/> are never deferred. A realised
+    /// element is kept when it scrolls away again (<see cref="CullsOffscreenColumns"/> still hides it from the renderer).
+    /// </summary>
+    public bool DefersOffscreenCellElements
+    {
+        get => _defersOffscreenCellElements;
+        set
+        {
+            if (_defersOffscreenCellElements == value)
+                return;
+            _defersOffscreenCellElements = value;
+            RefreshCulling();
+        }
+    }
+
+    private bool _defersOffscreenCellElements = true;
+
+    /// <summary>
     /// Gets the actual width of the row header.
     /// </summary>
     public double RowHeaderActualWidth => (double)GetValue(RowHeaderActualWidthProperty);

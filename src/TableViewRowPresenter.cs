@@ -186,6 +186,8 @@ public partial class TableViewRowPresenter : Control
             // there too), and the table's width bounds it from above (TableView.RefreshCulling re-runs this when the
             // width changes: it is 0 on the first pass). Opacity only, so no layout is invalidated.
             HorizontalCulling.Apply(_scrollableCellsPanel, TableView.HorizontalOffset, TableView.ActualWidth, TableView.CullsOffscreenColumns);
+            // DH-2231: the same pass builds the deferred elements that have come into view; a frozen cell is always in view.
+            HorizontalCulling.RealizeAll(_frozenCellsPanel);
 
             // CellsHorizontalOffset is the boundary between the row header and the data cells — it's
             // positioned purely by HeaderColumn's width (see TableViewRowPresenter.xaml's ColumnDefinitions),

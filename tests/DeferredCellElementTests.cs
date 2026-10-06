@@ -97,7 +97,7 @@ public class DeferredCellElementTests
         Assert.IsTrue(cells[ColumnCount - 1].IsElementDeferred, "Precondition: the last cell is deferred");
 
         tableView.CurrentCellSlot = new TableViewCellSlot(0, ColumnCount - 1);
-        tableView.UpdateLayout();
+        await SettleAsync(tableView); // the current-cell change is applied after a yield, once scrolled into view
 
         Assert.IsFalse(cells[ColumnCount - 1].IsElementDeferred, "the current cell is built at once");
         Assert.IsNotNull(cells[ColumnCount - 1].Content);
@@ -113,10 +113,19 @@ public class DeferredCellElementTests
         Assert.IsTrue(cells[ColumnCount - 2].IsElementDeferred, "Precondition: the cell is deferred");
 
         tableView.MakeSelection(new TableViewCellSlot(0, ColumnCount - 2), false);
-        tableView.UpdateLayout();
+        await SettleAsync(tableView);
 
         Assert.IsTrue(cells[ColumnCount - 2].IsSelected, "selection is by slot, so a deferred cell is selected like any other");
         Assert.IsNotNull(cells[ColumnCount - 2].Content, "and, now current, it has its element");
+    }
+
+    private static async Task SettleAsync(TableView tableView)
+    {
+        for (var i = 0; i < 5; i++)
+        {
+            await Task.Delay(100);
+            tableView.UpdateLayout();
+        }
     }
 
     private static TableViewCell[] Cells(TableView tableView)

@@ -65,6 +65,8 @@ internal static class HorizontalCulling
 
             if (element is TableViewCell { IsElementDeferred: true } cell)
                 RealizeIfInView(cell, viewLeft, viewWidth);
+            else if (element is TableViewColumnHeader { IsTemplateDeferred: true } header)
+                RealizeIfInView(header, viewLeft, viewWidth);
 
             var hide = cull && element.ActualWidth > 0 && !IsInView(element.ActualOffset.X, element.ActualWidth, viewLeft, viewWidth);
             if (hide)
@@ -87,6 +89,22 @@ internal static class HorizontalCulling
         {
             if (child is TableViewCell { IsElementDeferred: true } cell)
                 cell.EnsureElement();
+            else if (child is TableViewColumnHeader { IsTemplateDeferred: true } header)
+                header.EnsureTemplate();
+        }
+    }
+
+    /// <summary>
+    /// Gives a deferred column header its template when it comes within <see cref="Margin"/> of the viewport, or when
+    /// its column may no longer be deferred (Datgel DH-2252). The same rule as a deferred cell's element.
+    /// </summary>
+    private static void RealizeIfInView(TableViewColumnHeader header, double viewLeft, double viewWidth)
+    {
+        var known = viewWidth > 0 && !double.IsNaN(viewLeft) && !double.IsNaN(viewWidth);
+        if (!header.ShouldDeferTemplate()
+            || (known && header.ActualWidth > 0 && IsInView(header.ActualOffset.X, header.ActualWidth, viewLeft, viewWidth)))
+        {
+            header.EnsureTemplate();
         }
     }
 

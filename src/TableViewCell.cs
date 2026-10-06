@@ -557,7 +557,11 @@ public partial class TableViewCell : ContentControl
     /// </summary>
     internal void PrepareForEdit(RoutedEventArgs editingArgs)
     {
+        // DH-2231: a single-element column edits its resting element, so a deferred one must exist first.
+        if (Column?.UseSingleElement is true)
+            EnsureElement();
         var editingElement = SetEditingElement();
+        IsElementDeferred = false;
         Content = editingElement;
 
         if (TableView is not null)
@@ -612,14 +616,73 @@ public partial class TableViewCell : ContentControl
     internal void EndEditing(TableViewEditAction editAction)
     {
         Column?.EndCellEditing(this, Row?.Content, editAction, _uneditedValue);
-        SetElement();
+        // The cell just edited is the current one and in view: never deferred (DH-2231).
+        RealizeElement(focus: true);
     }
 
     /// <summary>
-    /// Sets the element for the cell.
+    /// Sets the element for the cell, or - for a cell scrolled out of the horizontal viewport - defers building it
+    /// until it comes into view (<see cref="TableView.DefersOffscreenCellElements"/>, Datgel DH-2231).
     /// </summary>
     internal void SetElement()
     {
+        if (ShouldDeferElement() && !IsArrangedInView())
+        {
+            IsElementDeferred = true;
+            if (Content is not null)
+                Content = null;
+            return;
+        }
+
+        RealizeElement(focus: true);
+    }
+
+    /// <summary>
+    /// Whether this cell has not built its element yet because it was out of view (Datgel DH-2231). It keeps its
+    /// place, width, index and slot; <see cref="EnsureElement"/> builds the element.
+    /// </summary>
+    internal bool IsElementDeferred { get; private set; }
+
+    /// <summary>
+    /// Builds the element of a cell whose element was deferred (Datgel DH-2231). Does nothing otherwise.
+    /// </summary>
+    internal void EnsureElement()
+    {
+        if (IsElementDeferred)
+            RealizeElement(focus: false);
+    }
+
+    /// <summary>
+    /// Whether this cell may defer its element (Datgel DH-2231): the table defers off-screen elements, and the
+    /// column is not frozen (the frozen panel is never scrolled), not auto-width (its width is measured from its
+    /// cells' elements) and not marked <see cref="TableViewColumn.AlwaysRealizeElement"/> (a wrapping column
+    /// decides the row's height).
+    /// </summary>
+    internal bool ShouldDeferElement() =>
+        (TableView ?? Row?.TableView) is { DefersOffscreenCellElements: true }
+        && Column is { AlwaysRealizeElement: false, IsFrozen: false } column
+        && !column.Width.IsAuto;
+
+    /// <summary>
+    /// Whether this cell has been arranged and lies within <see cref="HorizontalCulling.Margin"/> of the viewport.
+    /// A cell not laid out yet is not known to be in view.
+    /// </summary>
+    private bool IsArrangedInView()
+    {
+        var tableView = TableView ?? Row?.TableView;
+        return tableView is not null
+               && tableView.ActualWidth > 0
+               && ActualWidth > 0
+               && HorizontalCulling.IsInView(ActualOffset.X, ActualWidth, tableView.HorizontalOffset, tableView.ActualWidth);
+    }
+
+    /// <summary>
+    /// Builds the element for the cell. <paramref name="focus"/> keeps the library's own focus request (Uno) for a
+    /// cell built normally; a cell realised because it scrolled into view must not take focus from the user.
+    /// </summary>
+    private void RealizeElement(bool focus)
+    {
+        IsElementDeferred = false;
         var element = Column?.GenerateElement(this, Row?.Content);
 
         if (element is not null && Column is TableViewBoundColumn { ElementStyle: { } } boundColumn)
@@ -630,21 +693,27 @@ public partial class TableViewCell : ContentControl
         Content = element;
 
 #if !WINDOWS
-        DispatcherQueue.TryEnqueue(async () =>
+        if (focus)
         {
-            await Task.Delay(20);
-            Focus(FocusState.Pointer);
-        });
+            DispatcherQueue.TryEnqueue(async () =>
+            {
+                await Task.Delay(20);
+                Focus(FocusState.Pointer);
+            });
+        }
 #endif
 
         DispatcherQueue.TryEnqueue(InvalidateMeasure);
     }
 
     /// <summary>
-    /// Refreshes the element for the cell.
+    /// Refreshes the element for the cell. A deferred cell has none; it is built for the row's current item when it
+    /// comes into view.
     /// </summary>
     internal void RefreshElement()
     {
+        if (IsElementDeferred)
+            return;
         Column?.RefreshElement(this, Row?.Content);
     }
 
@@ -677,6 +746,10 @@ public partial class TableViewCell : ContentControl
         var stateName = IsCurrent ? VisualStates.StateCurrent : VisualStates.StateRegular;
         VisualStates.GoToState(this, false, stateName);
 
+        // DH-2231: the current cell always has its element (keyboard toggles, focus and edits act on it).
+        if (IsCurrent)
+            EnsureElement();
+
         if (IsCurrent && !skipFocus)
         {
             Focus(FocusState.Pointer);
@@ -694,6 +767,8 @@ public partial class TableViewCell : ContentControl
     /// </summary>
     internal void UpdateElementState()
     {
+        if (IsElementDeferred)
+            return; // built in the current state when it comes into view (DH-2231)
         Column?.UpdateElementState(this, Row?.Content);
     }
 

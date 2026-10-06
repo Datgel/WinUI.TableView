@@ -453,6 +453,26 @@ public abstract partial class TableViewColumn : DependencyObject
     }
 
     /// <summary>
+    /// Gets or sets whether this column's cells always build their element, even while they are scrolled out of the
+    /// horizontal viewport (Datgel DH-2231). Off by default: with <see cref="TableView.DefersOffscreenCellElements"/> on,
+    /// an off-screen cell keeps its place and width but does not call <see cref="GenerateElement"/> until it comes
+    /// into view. Set it on a column whose content decides the ROW's height - a wrapping (memo) column - so a row does
+    /// not change height while the user scrolls sideways.
+    /// </summary>
+    public bool AlwaysRealizeElement
+    {
+        get;
+        set
+        {
+            if (field != value)
+            {
+                field = value;
+                TableView?.RefreshCulling();
+            }
+        }
+    }
+
+    /// <summary>
     /// Gets or sets the optional data binding used to perform operations on cell content, for example sorting, filtering and exporting.
     /// </summary>
     public virtual Binding? OperationContentBinding { get; set; }

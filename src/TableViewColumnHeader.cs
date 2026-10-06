@@ -465,6 +465,11 @@ public partial class TableViewColumnHeader : ContentControl
             return;
         IsTemplateDeferred = false;
         ClearValue(TemplateProperty);
+        // Uno's Control.OnTemplateChanged only removes the old visual: it neither applies the new template nor
+        // invalidates measure, and this header's size is fixed, so nothing else would. Measured on the Skia head
+        // (Datgel Hub's grid-open harness): without these two lines an in-view header never got its template back.
+        ApplyTemplate();
+        InvalidateMeasure();
     }
 
     /// <summary>

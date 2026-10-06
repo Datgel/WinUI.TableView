@@ -238,6 +238,12 @@ public class TableViewColumnsCollectionTests
         static long Build(int n)
         {
             var collection = new TableViewColumnsCollection(new TableView());
+            // Datgel DH-2231: collect BEFORE timing, so garbage left by earlier UI tests (tables they loaded and
+            // released) is not collected inside one of the two timed builds - a single gen-2 pause there moved the
+            // ratio from ~2.5x to ~7x on hosted CI with the column-build code unchanged.
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             for (var i = 0; i < n; i++)
             {

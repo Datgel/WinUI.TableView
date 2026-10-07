@@ -93,7 +93,7 @@ public partial class TableViewColumnHeader : ContentControl
         // Shows the button's flyout if options button is available and filtering is enabled
         if (_optionsButton is not null && CanFilter)
         {
-            _optionsButton.Flyout?.ShowAt(_optionsButton);
+            ShowOptionsFlyout();
             e.Handled = true;
         }
     }
@@ -358,6 +358,7 @@ public partial class TableViewColumnHeader : ContentControl
         base.OnApplyTemplate();
 
         _optionsButton?.Tapped -= OnOptionsButtonTaped;
+        _optionsButton?.Click -= OnOptionsButtonClick;
 
         FilterItemsControl?.FilterItems = null;
         FilterItemsControl?.TableView = null;
@@ -366,25 +367,119 @@ public partial class TableViewColumnHeader : ContentControl
         _tableView = this.FindAscendant<TableView>();
         _headerRow = this.FindAscendant<TableViewHeaderRow>();
         _optionsButton = GetTemplateChild("OptionsButton") as Button;
-        _optionsFlyout = GetTemplateChild("OptionsFlyout") as TableViewFilterMenuFlyout;
+        // DH-2252: a template that still declares the menu (an OptionsFlyout part under the button) keeps it, built
+        // with the template as before. The default template does not, and the menu is built on its first open.
+        var declaredFlyout = GetTemplateChild("OptionsFlyout") as TableViewFilterMenuFlyout;
+        _optionsFlyout = declaredFlyout ?? (_optionsFlyout is { IsDeclared: false } built ? built : null);
         _contentPresenter = GetTemplateChild("ContentPresenter") as ContentPresenter;
         _v_gridLine = GetTemplateChild("VerticalGridLine") as Rectangle;
 
-        if (_tableView is null || _optionsButton is null || _optionsFlyout is null)
+        if (_tableView is null || _optionsButton is null)
         {
             return;
         }
 
-        _optionsFlyout.TableView = _tableView;
-        _optionsFlyout.ColumnHeader = this;
-
         _optionsButton.Tapped += OnOptionsButtonTaped;
 
-        SetOptionCommands();
+        if (declaredFlyout is not null)
+        {
+            declaredFlyout.IsDeclared = true;
+            declaredFlyout.TableView = _tableView;
+            declaredFlyout.ColumnHeader = this;
+            SetOptionCommands();
+        }
+        else
+        {
+            _optionsButton.Click += OnOptionsButtonClick;
+        }
+
         SetFilterButtonVisibility();
         EnsureGridLines();
         OnSortDirectionChanged();
+        // DH-2252: a header realised after its column was filtered must show it (OnIsFilteredChanged ran on no template).
+        OnIsFilteredChanged();
     }
+
+    /// <summary>
+    /// Opens the options menu from the options button when the template does not declare one (Datgel fork, DH-2252).
+    /// </summary>
+    private void OnOptionsButtonClick(object sender, RoutedEventArgs e)
+    {
+        ShowOptionsFlyout();
+    }
+
+    /// <summary>
+    /// Shows the options menu at the options button, building it first if this is its first open (Datgel fork, DH-2252).
+    /// </summary>
+    internal void ShowOptionsFlyout()
+    {
+        if (_optionsButton is null)
+        {
+            return;
+        }
+
+        EnsureOptionsFlyout()?.ShowAt(_optionsButton);
+    }
+
+    /// <summary>
+    /// The options menu, built on first use when the template does not declare it (Datgel fork, DH-2252). Null before
+    /// the template is applied.
+    /// </summary>
+    internal TableViewFilterMenuFlyout? EnsureOptionsFlyout()
+    {
+        if (_optionsFlyout is null && _tableView is not null)
+        {
+            _optionsFlyout = CreateOptionsFlyout();
+        }
+
+        _optionsFlyout?.TableView = _tableView;
+        _optionsFlyout?.ColumnHeader = this;
+        return _optionsFlyout;
+    }
+
+    /// <summary>Whether the options menu has been built (Datgel fork, DH-2252): it is not until it is first opened.</summary>
+    internal bool HasOptionsFlyout => _optionsFlyout is not null;
+
+    /// <summary>
+    /// Whether this header's template is deferred because it was out of the horizontal viewport when it was created
+    /// (Datgel fork, DH-2252): it keeps its column, width and place, but builds no visual tree until it comes into view.
+    /// </summary>
+    internal bool IsTemplateDeferred { get; private set; }
+
+    /// <summary>
+    /// Withholds the template (a local <c>null</c> Template, which outranks the style's) until
+    /// <see cref="EnsureTemplate"/> (Datgel fork, DH-2252).
+    /// </summary>
+    internal void DeferTemplate()
+    {
+        if (IsTemplateDeferred)
+            return;
+        IsTemplateDeferred = true;
+        Template = null;
+    }
+
+    /// <summary>Gives a deferred header its template back (the style's). Does nothing otherwise.</summary>
+    internal void EnsureTemplate()
+    {
+        if (!IsTemplateDeferred)
+            return;
+        IsTemplateDeferred = false;
+        ClearValue(TemplateProperty);
+        // Uno's Control.OnTemplateChanged only removes the old visual: it neither applies the new template nor
+        // invalidates measure, and this header's size is fixed, so nothing else would. Measured on the Skia head
+        // (Datgel Hub's grid-open harness): without these two lines an in-view header never got its template back.
+        ApplyTemplate();
+        InvalidateMeasure();
+    }
+
+    /// <summary>
+    /// Whether this header may defer its template (Datgel fork, DH-2252): the table defers off-screen headers, and the
+    /// column is not frozen (the frozen panel never scrolls) and has an absolute width (an auto width is measured from
+    /// the header, and a star width from the table, so neither is known without it).
+    /// </summary>
+    internal bool ShouldDeferTemplate() =>
+        Column is { IsFrozen: false, Width.IsAbsolute: true } column
+        && (_tableView ?? column.TableView) is { DefersOffscreenColumnHeaders: true };
 
     /// <summary>
     /// Handles the Tapped event for the options button.
@@ -749,6 +844,20 @@ public partial class TableViewColumnHeader : ContentControl
     /// <see cref="MeasureOverride"/>.
     /// </summary>
     internal double? CachedDesiredWidth { get; private set; }
+
+    /// <summary>
+    /// Gets or sets the style of the options menu's presenter (Datgel fork, DH-2252). The default style sets it; the
+    /// menu itself is built on its first open rather than with the template.
+    /// </summary>
+    public Style? OptionsFlyoutPresenterStyle
+    {
+        get => (Style?)GetValue(OptionsFlyoutPresenterStyleProperty);
+        set => SetValue(OptionsFlyoutPresenterStyleProperty, value);
+    }
+
+    /// <summary>Identifies the <see cref="OptionsFlyoutPresenterStyle"/> dependency property.</summary>
+    public static readonly DependencyProperty OptionsFlyoutPresenterStyleProperty = DependencyProperty.Register(
+        nameof(OptionsFlyoutPresenterStyle), typeof(Style), typeof(TableViewColumnHeader), new PropertyMetadata(null));
 
     /// <summary>
     /// Gets or sets the column associated with the header.

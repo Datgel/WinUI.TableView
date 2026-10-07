@@ -99,6 +99,12 @@ public partial class TableViewFilterMenuFlyout : Flyout
     }
 
     /// <summary>
+    /// Whether this menu was declared by the header's template (an <c>OptionsFlyout</c> part) rather than built on its
+    /// first open (Datgel fork, DH-2252).
+    /// </summary>
+    internal bool IsDeclared { get; set; }
+
+    /// <summary>
     /// Gets or sets the TableView associated with this filter menu flyout.
     /// </summary>
     public TableView? TableView { get; set; }

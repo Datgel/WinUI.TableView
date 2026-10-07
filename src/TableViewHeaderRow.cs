@@ -111,6 +111,10 @@ public partial class TableViewHeaderRow : Control
     {
         finalSize = base.ArrangeOverride(finalSize);
 
+        // DH-2252: the frozen headers never scroll, so none of them stays deferred (a column frozen after its header
+        // was created moves here with no template).
+        HorizontalCulling.RealizeAll(_frozenHeadersPanel);
+
         if (_scrollableHeadersPanel is not null && _frozenHeadersPanel is not null && TableView is not null && _scrollableHeadersPanel.ActualWidth > 0)
         {
             var frozenOffset = _frozenHeadersPanel.ActualOffset.X + _frozenHeadersPanel.ActualWidth;
@@ -270,6 +274,13 @@ public partial class TableViewHeaderRow : Control
                 var header = new TableViewColumnHeader { DataContext = column, Column = column };
                 column.HeaderControl = header;
 
+                // DH-2252: nothing is arranged yet, so a header that may defer starts without its template; the first
+                // arrange with a known viewport (ArrangeOverride -> HorizontalCulling) gives the visible ones theirs.
+                if (header.ShouldDeferTemplate())
+                {
+                    header.DeferTemplate();
+                }
+
                 InsertHeader(header);
 
                 header.SetBinding(ContentControl.ContentProperty, SharedResources.HeaderBinding);
@@ -368,6 +379,9 @@ public partial class TableViewHeaderRow : Control
 
         if (column.HeaderControl is { } header && autoWidthMode is not TableViewColumnAutoWidthMode.Cells)
         {
+            // DH-2252: a header's desired width is measured from its template.
+            header.EnsureTemplate();
+
             if (header.CachedDesiredWidth is null)
             {
                 header.Width = double.NaN;

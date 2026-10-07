@@ -934,6 +934,27 @@ public partial class TableView
     private bool _defersOffscreenCellElements = true;
 
     /// <summary>
+    /// Gets or sets whether a column header outside the horizontal viewport defers its template until it comes into
+    /// view (Datgel DH-2252). On by default. The header itself is still created, with its column, width and place, so
+    /// column widths, the UI Automation header items and resizing a column in view are unaffected. A frozen column and
+    /// a column whose width is not absolute (auto is measured from its header, star from the table) are never deferred.
+    /// A realised header keeps its template when it scrolls away again.
+    /// </summary>
+    public bool DefersOffscreenColumnHeaders
+    {
+        get => _defersOffscreenColumnHeaders;
+        set
+        {
+            if (_defersOffscreenColumnHeaders == value)
+                return;
+            _defersOffscreenColumnHeaders = value;
+            RefreshCulling();
+        }
+    }
+
+    private bool _defersOffscreenColumnHeaders = true;
+
+    /// <summary>
     /// Gets the actual width of the row header.
     /// </summary>
     public double RowHeaderActualWidth => (double)GetValue(RowHeaderActualWidthProperty);

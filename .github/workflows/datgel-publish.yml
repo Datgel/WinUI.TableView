@@ -217,7 +217,7 @@ jobs:
           $head = (git rev-parse HEAD).Trim()
           if ($new.RepositoryCommit -and $new.RepositoryCommit -ne $head) { Write-Host "::warning::nuspec repository commit $($new.RepositoryCommit) is not HEAD $head." }
 
-          Write-Host "lib/ files: $($new.Lib.Count) (reference $env:REFERENCE_VERSION: $($old.Lib.Count))"
+          Write-Host "lib/ files: $($new.Lib.Count) (reference ${env:REFERENCE_VERSION}: $($old.Lib.Count))"
           $new.Lib | ForEach-Object { Write-Host "  $_" }
           $missing = $old.Lib | Where-Object { $new.Lib -notcontains $_ }
           $extra   = $new.Lib | Where-Object { $old.Lib -notcontains $_ }

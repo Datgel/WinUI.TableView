@@ -259,7 +259,9 @@ jobs:
           $rc = $LASTEXITCODE
           Write-Host $out
           if ($rc -eq 0) { throw "Re-pushing $env:REFERENCE_VERSION SUCCEEDED - the feed accepted a duplicate; investigate before trusting the duplicate refusal." }
-          if ($out -match '409|Conflict|already exists') { Write-Host "Auth probe: 409 Conflict - GITHUB_TOKEN can publish $env:PACKAGE_ID; duplicates are refused." }
+          # Negative-controlled 2026-10-09: the same re-push with a read:packages-only token
+          # answers 403 Forbidden, so a 409 here really does mean "authorised to write".
+          if ($out -match '409|Conflict|already exists') { Write-Host "Auth probe: 409 Conflict - GITHUB_TOKEN can publish $env:PACKAGE_ID; duplicates are refused."; exit 0 }
           elseif ($out -match '401|403|Forbidden|Unauthorized') { throw "Auth probe: GITHUB_TOKEN may NOT publish $env:PACKAGE_ID. Grant this repository Write under the package's 'Manage Actions access', or move FEED_TOKEN to a secret." }
           else { throw "Auth probe: unexpected answer (rc=$rc) - read the output above." }
 

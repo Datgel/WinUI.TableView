@@ -156,7 +156,7 @@ jobs:
           . ./.github/scripts/datgel-feed.ps1
           $versions = Get-FeedVersions
           Write-Host "On the feed now ($($versions.Count)): $($versions -join ', ')"
-          if ($versions -contains $env:PACKAGE_VERSION.ToLowerInvariant()) {
+          if ($versions -contains (ConvertTo-NuGetVersion $env:PACKAGE_VERSION)) {
             if ($env:PUBLISH -eq 'True') { throw "$env:PACKAGE_ID $env:PACKAGE_VERSION is ALREADY on the feed - versions are immutable; choose the next one." }
             Write-Host "::warning::$env:PACKAGE_VERSION is already on the feed (dry run, so not fatal)."
           }
@@ -212,7 +212,7 @@ jobs:
           $old = Read-Nupkg $env:REFERENCE_PATH
 
           if ($new.Id -ne $env:PACKAGE_ID) { throw "nuspec id is '$($new.Id)', expected $env:PACKAGE_ID." }
-          if ($new.Version -ne $env:PACKAGE_VERSION) { throw "nuspec version is '$($new.Version)', expected $env:PACKAGE_VERSION." }
+          if ($new.Version.ToLowerInvariant() -ne (ConvertTo-NuGetVersion $env:PACKAGE_VERSION)) { throw "nuspec version is '$($new.Version)', expected $env:PACKAGE_VERSION." }
           if ($new.RepositoryUrl -ne $env:REPOSITORY_URL) { throw "nuspec repository is '$($new.RepositoryUrl)', expected $env:REPOSITORY_URL." }
           $head = (git rev-parse HEAD).Trim()
           if ($new.RepositoryCommit -and $new.RepositoryCommit -ne $head) { Write-Host "::warning::nuspec repository commit $($new.RepositoryCommit) is not HEAD $head." }

@@ -2,6 +2,15 @@
 # Talks to the datgel-github NuGet feed with Basic auth FEED_USER:FEED_TOKEN.
 # Needs env: FEED_URL, FEED_USER, FEED_TOKEN, PACKAGE_ID.
 
+# NuGet's normalised form, as written into the nuspec and served by the feed: a 4th part
+# of 0 is dropped (1.5.0.0 -> 1.5.0, 1.5.0.0-x -> 1.5.0-x), lower-case. Measured on the first
+# dry run of this workflow, which packed 1.5.0.0-dryrun.1 and got nuspec version 1.5.0-dryrun.1.
+function ConvertTo-NuGetVersion([string] $Version) {
+    $v = $Version.Trim().ToLowerInvariant()
+    if ($v -match '^(\d+\.\d+\.\d+)\.0+(-.*)?$') { $v = $Matches[1] + $Matches[2] }
+    $v
+}
+
 function Get-FeedHeaders {
     if ([string]::IsNullOrEmpty($env:FEED_TOKEN)) { throw "FEED_TOKEN is empty." }
     $pair = "$($env:FEED_USER):$($env:FEED_TOKEN)"
@@ -28,7 +37,7 @@ function Get-FeedVersions {
 
 function Save-FeedPackage([string] $Version, [string] $OutFile) {
     $id = $env:PACKAGE_ID.ToLowerInvariant()
-    $v = $Version.ToLowerInvariant()
+    $v = ConvertTo-NuGetVersion $Version
     # The feed redirects to signed blob storage; PowerShell 7 drops Authorization on the cross-host hop.
     Invoke-WebRequest -Uri "$(Get-FeedBaseAddress)/$id/$v/$id.$v.nupkg" -Headers (Get-FeedHeaders) -OutFile $OutFile
 }

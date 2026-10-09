@@ -101,5 +101,8 @@ only offers it once the workflow file is on the repository's default branch (`ma
 upstream mirror), so the tag is the release path.
 
 Tags are `datgel-v*`, never `v*`: upstream's `cd-build.yml` publishes `v*` tags to nuget.org.
-The package is not strong-named, Authenticode-signed or obfuscated (third-party MIT code,
-repacked as-is).
+The assembly is **strong-named** with the committed `src/Datgel.WinUI.TableView.snk` (2048-bit,
+public key token `1be46287a3c9dbc5`) in every configuration, and the workflow refuses a package
+whose DLLs lack that token (DH-2532). The test project is signed with the same key, which is why
+`InternalsVisibleTo` names the full public key. It is not Authenticode-signed, and it is never
+obfuscated (a WinUI/XAML assembly). Versions up to 1.5.0.6 were not strong-named.

@@ -11,6 +11,9 @@
     <WinUIDSKReferences>false</WinUIDSKReferences>
     <EnableMsixTooling>true</EnableMsixTooling>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- DH-2532: signed with the library's key - its InternalsVisibleTo names this public key. -->
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>$(MSBuildThisFileDirectory)..\src\Datgel.WinUI.TableView.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
 
   <ItemGroup>

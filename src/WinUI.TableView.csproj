@@ -20,9 +20,18 @@
     <WindowsSdkPackageVersion>10.0.19041.56</WindowsSdkPackageVersion>
   </PropertyGroup>
 
+  <!-- Datgel fork (DH-2532, Phil 2026-10-09): strong-named in every configuration with the committed
+       2048-bit key. Not Authenticode-signed and never obfuscated (a WinUI/XAML assembly). The test
+       project is signed with the same key, so the friend below names that full public key
+       (from `sn -Tp`; a bare name is CS1726 once this assembly is signed). -->
+  <PropertyGroup>
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>$(MSBuildThisFileDirectory)Datgel.WinUI.TableView.snk</AssemblyOriginatorKeyFile>
+  </PropertyGroup>
+
   <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
-      <_Parameter1>WinUI.TableView.Tests</_Parameter1>
+      <_Parameter1>WinUI.TableView.Tests, PublicKey=0024000004800000140100000602000000240000525341310008000001000100c1d558d99583acd4c38d7d4bdc0f0e3a27b79488089a02a702bfc5989916b533ae4414794461181d38dbc54d3e6caf126c8712ff8de1992c9d9f7dd0bb972305ae93d70da4b441daeb990415cd0e605f7f6f891dc4552c93491f666b2ef5a5cb1dea9e741efba04f2c365917732bbb72ba2c42fa792ddb6b97f243de4063a5e16ce255701b623b8792d0c4e523a31b2bd2bee5b0258172c58ed035c49475e51a07608f1480dc18fd7a34e9e500a1310557e3b789f9926a9193833811ddc1523307b94410eb8e7ad3e2aa0d2f7dc172cd1ee9d73342879a81c0c41237a5c4f67737567be6b55d7e4bfceea8e7623eb5094c9cc422f8c4f3937d7480bc6595329b</_Parameter1>
     </AssemblyAttribute>
   </ItemGroup>
 

@@ -10,6 +10,9 @@
     <OutputType>Exe</OutputType>
     <UnoSingleProject>true</UnoSingleProject>
     <AssemblyName>WinUI.TableView.Tests</AssemblyName>
+    <!-- DH-2532: signed with the library's key - its InternalsVisibleTo names this public key. -->
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>$(MSBuildThisFileDirectory)..\..\src\Datgel.WinUI.TableView.snk</AssemblyOriginatorKeyFile>
     <ApplicationTitle>WinUI.TableView.Tests</ApplicationTitle>
     <ApplicationId>com.W.Ahmad.WinUI.TableView.Tests</ApplicationId>
     <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>

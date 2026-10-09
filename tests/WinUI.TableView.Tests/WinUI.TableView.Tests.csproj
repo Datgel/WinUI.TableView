@@ -14,6 +14,9 @@
     <!-- Keep the Windows App SDK runtime beside the executable, including on CI. -->
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- DH-2532: signed with the library's key - its InternalsVisibleTo names this public key. -->
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>$(MSBuildThisFileDirectory)..\..\src\Datgel.WinUI.TableView.snk</AssemblyOriginatorKeyFile>
     <TestingExtensionsProfile>None</TestingExtensionsProfile>
     <EnableMicrosoftTestingExtensionsTrxReport>true</EnableMicrosoftTestingExtensionsTrxReport>
   </PropertyGroup>

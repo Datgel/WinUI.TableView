@@ -55,3 +55,51 @@ When you open a pull request, our CI pipeline automatically builds and publishes
 ## 💙 Thank You
 
 Thank you for being a part of the WinUI.TableView community. Every contribution counts!
+
+---
+
+## Datgel fork: publishing `Datgel.WinUI.TableView`
+
+This fork (`Datgel/WinUI.TableView`) repacks upstream plus Datgel's patches as
+**`Datgel.WinUI.TableView`** on the internal `datgel-github` feed
+(`https://nuget.pkg.github.com/Datgel/index.json`), which Datgel.Hub restores from.
+The working branch is `datgel/v<X.Y.Z>-patched` (today `datgel/v1.5.0-patched`); fork
+PRs target it, never `main` (which mirrors upstream).
+
+Publishing is done by `.github/workflows/datgel-publish.yml` (DH-2508), never from a dev box.
+
+**Cut a release** once the fork PR is merged into `datgel/v<X.Y.Z>-patched`:
+
+```powershell
+git fetch origin
+git tag datgel-v1.5.0.7 origin/datgel/v1.5.0-patched   # next free 4th part
+git push origin datgel-v1.5.0.7
+```
+
+Then bump `Datgel.WinUI.TableView` in Hub's `Directory.Packages.props` to that version.
+
+What the workflow enforces:
+
+- The version is explicit and 4-part (`Major.Minor.Build.Revision`, optional `-prerelease`);
+  `X.Y.Z` must name a `datgel/vX.Y.Z-patched` branch, and the commit must be on it.
+- A version already on the feed is refused before anything is built - versions are immutable.
+- The package is packed the way every earlier version was: a separate
+  `dotnet restore -p:Configuration=Release`, then VS MSBuild `-t:Pack`
+  (`dotnet pack` cannot build the `-windows10.0.19041` TFMs), with `PackageId`,
+  `Version` and the fork's `RepositoryUrl` overridden.
+- The `lib/` file set must equal the newest published version's (21 files today) unless
+  `allow_layout_change` is set; dependency-group changes are reported as warnings.
+- After the push it downloads the package back from the feed and requires the SHA-256 to
+  match what was packed, then prints the feed's version list.
+
+**Dry run** (nothing pushed): every PR into `datgel/v*-patched` runs it. It packs, checks
+the package, and proves the workflow token can still publish by re-pushing the newest
+version already on the feed and requiring `409 Conflict`.
+
+A manual run (`workflow_dispatch`, `version` + `push` inputs) is also defined, but GitHub
+only offers it once the workflow file is on the repository's default branch (`main`, the
+upstream mirror), so the tag is the release path.
+
+Tags are `datgel-v*`, never `v*`: upstream's `cd-build.yml` publishes `v*` tags to nuget.org.
+The package is not strong-named, Authenticode-signed or obfuscated (third-party MIT code,
+repacked as-is).

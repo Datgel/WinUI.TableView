@@ -39,8 +39,10 @@ run-name: "${{ github.event_name == 'push' && format('Publish {0}', github.ref_n
 # means the token lost write: grant this repo Write under the package's
 # "Manage Actions access", or switch FEED_TOKEN to a secret.
 #
-# NOT signed: no strong name, no Authenticode, no obfuscation - identical to every
-# Datgel.WinUI.TableView published so far (third-party MIT code, repacked).
+# STRONG-NAMED, nothing more (DH-2532, Phil 2026-10-09): every build is signed with the
+# committed src/Datgel.WinUI.TableView.snk and the pack is checked for its token. No
+# Authenticode, and never obfuscated (a WinUI/XAML assembly). Versions up to 1.5.0.6 and
+# 1.5.0.7-ci.1 were not strong-named.
 # -----------------------------------------------------------------------------
 
 on:
@@ -80,6 +82,8 @@ env:
   FEED_URL: https://nuget.pkg.github.com/Datgel/index.json
   REPOSITORY_URL: https://github.com/Datgel/WinUI.TableView
   PROJECT: src/WinUI.TableView.csproj
+  # DH-2532: the token of src/Datgel.WinUI.TableView.snk (sn -tp). Every packed DLL must carry it.
+  PUBLIC_KEY_TOKEN: 1be46287a3c9dbc5
 
 jobs:
   pack:
@@ -228,6 +232,19 @@ jobs:
           # Every TFM must carry the assembly itself.
           $tfms = $new.Lib | ForEach-Object { ($_ -split '/')[1] } | Sort-Object -Unique
           foreach ($tfm in $tfms) { if ($new.Lib -notcontains "lib/$tfm/WinUI.TableView.dll") { throw "lib/$tfm has no WinUI.TableView.dll." } }
+
+          # DH-2532: every WinUI.TableView.dll is strong-named with the fork's committed key.
+          $unzip = Join-Path $env:RUNNER_TEMP 'pkg-strongname'
+          Remove-Item $unzip -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive $pkg.FullName $unzip
+          $dlls = @(Get-ChildItem (Join-Path $unzip 'lib') -Recurse -Filter WinUI.TableView.dll)
+          if ($dlls.Count -eq 0) { throw "No WinUI.TableView.dll under lib/ to check for a strong name." }
+          foreach ($dll in $dlls) {
+            $token = -join ([System.Reflection.AssemblyName]::GetAssemblyName($dll.FullName).GetPublicKeyToken() | ForEach-Object { $_.ToString('x2') })
+            $rel = $dll.FullName.Substring($unzip.Length)
+            if ($token -ne $env:PUBLIC_KEY_TOKEN) { throw "$rel has public key token '$token', expected $env:PUBLIC_KEY_TOKEN - not strong-named with src/Datgel.WinUI.TableView.snk." }
+            Write-Host "Strong-named: $rel ($token)"
+          }
 
           if ($new.Dependencies -ne $old.Dependencies) {
             # Legitimate on an upstream re-cut (1.4.1 -> 1.5.0 moved Uno/WinAppSDK), so a notice, not a failure.

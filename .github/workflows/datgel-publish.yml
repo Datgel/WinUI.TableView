@@ -1,0 +1,296 @@
+name: datgel-publish
+
+run-name: "${{ github.event_name == 'push' && format('Publish {0}', github.ref_name) || (github.event_name == 'workflow_dispatch' && inputs.push && format('Publish {0} from {1}', inputs.version, github.ref_name)) || format('Dry run - pack Datgel.WinUI.TableView from {0}', github.head_ref || github.ref_name) }}"
+
+# -----------------------------------------------------------------------------
+# DH-2508 - pack and publish the Datgel fork as Datgel.WinUI.TableView to the
+# internal datgel-github NuGet feed (https://nuget.pkg.github.com/Datgel/index.json),
+# which Datgel.Hub restores from. Before this workflow every 1.x.y.N was packed on
+# a dev box; a merged fork PR (DH-2252, #10) then left Hub's bumped pin unrestorable
+# (NU1102) until someone did it by hand.
+#
+#   push tag datgel-v<version>      THE RELEASE. e.g. datgel-v1.5.0.7. Packs the tagged
+#                                   commit at exactly that version and pushes it.
+#   workflow_dispatch               version + push inputs. push=false (default) is a DRY
+#                                   RUN on any branch; push=true publishes, and only from
+#                                   the datgel/v<X.Y.Z>-patched branch the version belongs to.
+#   pull_request -> datgel/v*-patched   DRY RUN of the PR head (pack + content checks).
+#
+# Versions are EXPLICIT, never guessed. A version already on the feed is refused before
+# anything is built (GitHub Packages never overwrites a version; a race that loses is a
+# 409 and fails the push - no --skip-duplicate, so it can never pass silently).
+#
+# The tag namespace is datgel-v*, NOT v*: upstream's cd-build.yml fires on v* and pushes
+# to nuget.org.
+#
+# RUNNER: GitHub-hosted windows-latest, deliberately (Datgel's rule is the DGSGLT14 pool).
+# This fork is PUBLIC, and no Datgel org runner group allows public repositories
+# (Default / windows-build / windows-test: allows_public_repositories=false, read
+# 2026-10-09), so a self-hosted job here would queue for 24 h and die. Hosted minutes
+# are not billed for a public repository. Upstream's own ci-build/cd-build pack this
+# project on hosted windows the same way, so the toolchain is proven there.
+# Hosted VMs are fresh: setup-dotnet is fine here (the shared-install race is a
+# self-hosted problem), there is no actions/cache, and MSBuild takes the whole VM (-m).
+#
+# AUTH: GITHUB_TOKEN with packages: write. The package is linked to this repository,
+# so the workflow token inherits write on it. A dry run PROVES that without publishing:
+# it re-pushes the newest version already on the feed (byte-identical, downloaded from
+# the feed) and requires 409 Conflict - authorised, duplicate refused. 401/403 there
+# means the token lost write: grant this repo Write under the package's
+# "Manage Actions access", or switch FEED_TOKEN to a secret.
+#
+# NOT signed: no strong name, no Authenticode, no obfuscation - identical to every
+# Datgel.WinUI.TableView published so far (third-party MIT code, repacked).
+# -----------------------------------------------------------------------------
+
+on:
+  push:
+    tags:
+      - 'datgel-v*'
+  pull_request:
+    branches:
+      - 'datgel/v*-patched'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Package version, 4 parts (e.g. 1.5.0.7, or 1.5.0.7-dh1234.1). Must not exist on the feed."
+        required: true
+        type: string
+      push:
+        description: "Publish to datgel-github. Leave OFF for a dry run (pack + verify, nothing pushed)."
+        required: false
+        type: boolean
+        default: false
+      allow_layout_change:
+        description: "Allow the lib/ file set to differ from the newest published version (a new/removed TFM)."
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: datgel-publish-${{ github.event_name == 'pull_request' && github.head_ref || 'feed' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PACKAGE_ID: Datgel.WinUI.TableView
+  FEED_URL: https://nuget.pkg.github.com/Datgel/index.json
+  REPOSITORY_URL: https://github.com/Datgel/WinUI.TableView
+  PROJECT: src/WinUI.TableView.csproj
+
+jobs:
+  pack:
+    name: "Pack (and publish on a release)"
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      FEED_USER: ${{ github.actor }}
+      FEED_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version and mode (refuse anything ambiguous)
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          BASE_REF: ${{ github.base_ref }}
+          IN_VERSION: ${{ inputs.version }}
+          IN_PUSH: ${{ inputs.push }}
+          IN_ALLOW_LAYOUT: ${{ inputs.allow_layout_change }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $versionPattern = '^(\d+)\.(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z][0-9A-Za-z.-]*)?$'
+          $allowLayout = $false
+          switch ($env:EVENT) {
+            'push' {
+              if ($env:REF_NAME -notmatch '^datgel-v(.+)$') { throw "Tag '$env:REF_NAME' is not datgel-v<version>." }
+              $version = $Matches[1]; $publish = $true
+            }
+            'workflow_dispatch' {
+              $version = $env:IN_VERSION.Trim(); $publish = ($env:IN_PUSH -eq 'true')
+              $allowLayout = ($env:IN_ALLOW_LAYOUT -eq 'true')
+            }
+            'pull_request' {
+              if ($env:BASE_REF -notmatch '^datgel/v(\d+\.\d+\.\d+)-patched$') { throw "PR base '$env:BASE_REF' is not a datgel/v<X.Y.Z>-patched branch." }
+              # A dry-run version that can never collide with a real one.
+              $version = "$($Matches[1]).0-dryrun.$env:RUN_NUMBER"; $publish = $false
+            }
+            default { throw "Unexpected event $env:EVENT." }
+          }
+          if ($version -notmatch $versionPattern) { throw "Version '$version' is not 4-part (Major.Minor.Build.Revision[-prerelease])." }
+          $line = "datgel/v$($Matches[1]).$($Matches[2]).$($Matches[3])-patched"
+
+          if ($publish) {
+            # A published version must come from the patched branch it is named after.
+            git fetch origin "+refs/heads/${line}:refs/remotes/origin/$line" --quiet
+            if ($LASTEXITCODE) { throw "Branch $line does not exist on origin - version $version names no patched line." }
+            if ($env:EVENT -eq 'workflow_dispatch' -and $env:REF_NAME -ne $line) {
+              throw "push=true from '$env:REF_NAME' refused: $version may only be published from $line (dry runs may use any branch)."
+            }
+            $sha = (git rev-parse HEAD).Trim()
+            git merge-base --is-ancestor $sha "origin/$line"
+            $rc = $LASTEXITCODE
+            if ($rc -eq 1) { throw "Commit $sha is NOT on $line - refusing to publish an unmerged commit as $version." }
+            if ($rc -ne 0) { throw "git merge-base failed ($rc) - cannot verify ancestry; refusing to publish." }
+            Write-Host "Commit $($sha.Substring(0,8)) is on $line."
+          }
+
+          Write-Host "Version: $version   Publish: $publish   Line: $line"
+          "PACKAGE_VERSION=$version" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "PUBLISH=$publish"         | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "ALLOW_LAYOUT=$allowLayout" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Read the feed (refuse an existing version, fetch the reference package)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . ./.github/scripts/datgel-feed.ps1
+          $versions = Get-FeedVersions
+          Write-Host "On the feed now ($($versions.Count)): $($versions -join ', ')"
+          if ($versions -contains (ConvertTo-NuGetVersion $env:PACKAGE_VERSION)) {
+            if ($env:PUBLISH -eq 'True') { throw "$env:PACKAGE_ID $env:PACKAGE_VERSION is ALREADY on the feed - versions are immutable; choose the next one." }
+            Write-Host "::warning::$env:PACKAGE_VERSION is already on the feed (dry run, so not fatal)."
+          }
+          # Reference = newest stable version on the feed: the layout every Hub head restores today.
+          $stable = $versions | Where-Object { $_ -notmatch '-' } | Sort-Object { [version]$_ } -Descending
+          if (-not $stable) { throw "No stable $env:PACKAGE_ID on the feed to compare against." }
+          $ref = $stable[0]
+          New-Item -ItemType Directory -Force artifacts/reference | Out-Null
+          $refPath = "artifacts/reference/$($env:PACKAGE_ID.ToLowerInvariant()).$ref.nupkg"
+          Save-FeedPackage -Version $ref -OutFile $refPath
+          Write-Host "Reference package: $ref  SHA-256 $((Get-FileHash $refPath -Algorithm SHA256).Hash)"
+          "REFERENCE_VERSION=$ref"      | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "REFERENCE_PATH=$refPath"     | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Setup .NET SDKs (hosted VM only)
+        uses: actions/setup-dotnet@v5.0.1
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.100
+
+      - name: Setup MSBuild.exe
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Restore (separate, Release)
+        # Separate restore at the SAME configuration as the build, then MSBuild without
+        # -restore - the recipe every published 1.x.y.N used (NETSDK1005 on a stale obj otherwise).
+        run: |
+          dotnet restore $env:PROJECT -p:Configuration=Release
+          if ($LASTEXITCODE) { throw "restore failed ($LASTEXITCODE)" }
+
+      - name: Pack with VS MSBuild
+        # VS MSBuild, not `dotnet pack`: the -windows10.0.19041 TFMs die MSB4062
+        # ExpandPriContent under the SDK (no Microsoft.Build.Packaging.Pri.Tasks.dll there).
+        # -m with no number: a hosted VM is ours alone (no shared-pool CPU cap to respect).
+        run: |
+          msbuild $env:PROJECT -t:Pack -m -nr:false `
+            -p:Configuration=Release `
+            -p:PackageId=$env:PACKAGE_ID `
+            -p:Version=$env:PACKAGE_VERSION `
+            -p:RepositoryUrl=$env:REPOSITORY_URL
+          if ($LASTEXITCODE) { throw "msbuild -t:Pack failed ($LASTEXITCODE)" }
+
+      - name: Check the package against the reference
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . ./.github/scripts/datgel-feed.ps1
+          $pkgs = @(Get-ChildItem artifacts/NuGet/Release -Filter *.nupkg)
+          if ($pkgs.Count -ne 1) { throw "Expected exactly one .nupkg in artifacts/NuGet/Release, found $($pkgs.Count): $($pkgs.Name -join ', ')" }
+          $pkg = $pkgs[0]
+          $new = Read-Nupkg $pkg.FullName
+          $old = Read-Nupkg $env:REFERENCE_PATH
+
+          if ($new.Id -ne $env:PACKAGE_ID) { throw "nuspec id is '$($new.Id)', expected $env:PACKAGE_ID." }
+          if ($new.Version.ToLowerInvariant() -ne (ConvertTo-NuGetVersion $env:PACKAGE_VERSION)) { throw "nuspec version is '$($new.Version)', expected $env:PACKAGE_VERSION." }
+          if ($new.RepositoryUrl -ne $env:REPOSITORY_URL) { throw "nuspec repository is '$($new.RepositoryUrl)', expected $env:REPOSITORY_URL." }
+          $head = (git rev-parse HEAD).Trim()
+          if ($new.RepositoryCommit -and $new.RepositoryCommit -ne $head) { Write-Host "::warning::nuspec repository commit $($new.RepositoryCommit) is not HEAD $head." }
+
+          Write-Host "lib/ files: $($new.Lib.Count) (reference ${env:REFERENCE_VERSION}: $($old.Lib.Count))"
+          $new.Lib | ForEach-Object { Write-Host "  $_" }
+          $missing = $old.Lib | Where-Object { $new.Lib -notcontains $_ }
+          $extra   = $new.Lib | Where-Object { $old.Lib -notcontains $_ }
+          if ($missing -or $extra) {
+            $msg = "lib/ layout differs from $env:REFERENCE_VERSION. Missing: [$($missing -join ', ')]  Extra: [$($extra -join ', ')]"
+            if ($env:ALLOW_LAYOUT -eq 'True') { Write-Host "::warning::$msg (allowed by allow_layout_change)" } else { throw "$msg - rerun with allow_layout_change if a TFM change is intended." }
+          }
+          # Every TFM must carry the assembly itself.
+          $tfms = $new.Lib | ForEach-Object { ($_ -split '/')[1] } | Sort-Object -Unique
+          foreach ($tfm in $tfms) { if ($new.Lib -notcontains "lib/$tfm/WinUI.TableView.dll") { throw "lib/$tfm has no WinUI.TableView.dll." } }
+
+          if ($new.Dependencies -ne $old.Dependencies) {
+            # Legitimate on an upstream re-cut (1.4.1 -> 1.5.0 moved Uno/WinAppSDK), so a notice, not a failure.
+            Write-Host "::warning::Dependency groups differ from $env:REFERENCE_VERSION.`nNEW:`n$($new.Dependencies)`nREFERENCE:`n$($old.Dependencies)"
+          } else {
+            Write-Host "Dependency groups identical to $env:REFERENCE_VERSION."
+          }
+          $hash = (Get-FileHash $pkg.FullName -Algorithm SHA256).Hash
+          Write-Host "Packed $($pkg.Name)  SHA-256 $hash"
+          "PACKAGE_PATH=$($pkg.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "PACKAGE_SHA256=$hash"          | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE_ID }}.${{ env.PACKAGE_VERSION }}
+          path: artifacts/NuGet/Release/*.nupkg
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Prove the token can publish (dry run only - re-push an existing version, expect 409)
+        if: env.PUBLISH != 'True'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Byte-identical bytes the feed already holds, so nothing new can land: GitHub
+          # Packages answers 409 Conflict to an authorised duplicate, 401/403 to a token
+          # without write. That is the one question a dry run otherwise cannot answer.
+          $out = dotnet nuget push $env:REFERENCE_PATH --source $env:FEED_URL --api-key $env:FEED_TOKEN 2>&1 | Out-String
+          $rc = $LASTEXITCODE
+          Write-Host $out
+          if ($rc -eq 0) { throw "Re-pushing $env:REFERENCE_VERSION SUCCEEDED - the feed accepted a duplicate; investigate before trusting the duplicate refusal." }
+          # Negative-controlled 2026-10-09: the same re-push with a read:packages-only token
+          # answers 403 Forbidden, so a 409 here really does mean "authorised to write".
+          if ($out -match '409|Conflict|already exists') { Write-Host "Auth probe: 409 Conflict - GITHUB_TOKEN can publish $env:PACKAGE_ID; duplicates are refused."; exit 0 }
+          elseif ($out -match '401|403|Forbidden|Unauthorized') { throw "Auth probe: GITHUB_TOKEN may NOT publish $env:PACKAGE_ID. Grant this repository Write under the package's 'Manage Actions access', or move FEED_TOKEN to a secret." }
+          else { throw "Auth probe: unexpected answer (rc=$rc) - read the output above." }
+
+      - name: Push to datgel-github
+        if: env.PUBLISH == 'True'
+        run: |
+          # No --skip-duplicate: the version was checked absent above, so a 409 now is a
+          # race (someone else published it) and must fail, not pass silently.
+          dotnet nuget push $env:PACKAGE_PATH --source $env:FEED_URL --api-key $env:FEED_TOKEN
+          if ($LASTEXITCODE) { throw "push failed ($LASTEXITCODE)" }
+
+      - name: Verify the feed serves exactly what was packed
+        if: env.PUBLISH == 'True'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . ./.github/scripts/datgel-feed.ps1
+          $out = "artifacts/verify/$($env:PACKAGE_ID.ToLowerInvariant()).$env:PACKAGE_VERSION.nupkg"
+          New-Item -ItemType Directory -Force artifacts/verify | Out-Null
+          # The flat container can lag the push by a little; poll for up to ~3 minutes.
+          $got = $false
+          for ($i = 1; $i -le 18 -and -not $got; $i++) {
+            try { Save-FeedPackage -Version $env:PACKAGE_VERSION -OutFile $out; $got = $true }
+            catch { Write-Host "Attempt ${i}: not served yet ($($_.Exception.Message))"; Start-Sleep -Seconds 10 }
+          }
+          if (-not $got) { throw "$env:PACKAGE_VERSION was pushed but the feed did not serve it within ~3 minutes." }
+          $served = (Get-FileHash $out -Algorithm SHA256).Hash
+          Write-Host "Packed SHA-256 $env:PACKAGE_SHA256"
+          Write-Host "Served SHA-256 $served"
+          if ($served -ne $env:PACKAGE_SHA256) { throw "The feed serves DIFFERENT bytes for $env:PACKAGE_VERSION than were packed." }
+          $versions = Get-FeedVersions
+          Write-Host "On the feed now ($($versions.Count)): $($versions -join ', ')"
+          "### Published $env:PACKAGE_ID $env:PACKAGE_VERSION`nSHA-256 ``$served`` (packed = served)`n`nBump Hub's pin in ``Directory.Packages.props``." | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

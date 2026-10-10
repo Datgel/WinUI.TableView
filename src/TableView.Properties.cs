@@ -45,17 +45,17 @@ public partial class TableView
     /// <summary>
     /// Identifies the RowHeight dependency property.
     /// </summary>
-    public static readonly DependencyProperty RowHeightProperty = DependencyProperty.Register(nameof(RowHeight), typeof(double), typeof(TableView), new PropertyMetadata(double.NaN));
+    public static readonly DependencyProperty RowHeightProperty = DependencyProperty.Register(nameof(RowHeight), typeof(double), typeof(TableView), new PropertyMetadata(double.NaN, OnRowHeightsChanged));
 
     /// <summary>
     /// Identifies the RowMaxHeight dependency property.
     /// </summary>
-    public static readonly DependencyProperty RowMaxHeightProperty = DependencyProperty.Register(nameof(RowMaxHeight), typeof(double), typeof(TableView), new PropertyMetadata(double.PositiveInfinity));
+    public static readonly DependencyProperty RowMaxHeightProperty = DependencyProperty.Register(nameof(RowMaxHeight), typeof(double), typeof(TableView), new PropertyMetadata(double.PositiveInfinity, OnRowHeightsChanged));
 
     /// <summary>
     /// Identifies the RowMinHeight dependency property.
     /// </summary>
-    public static readonly DependencyProperty RowMinHeightProperty = DependencyProperty.Register(nameof(RowMinHeight), typeof(double), typeof(TableView), new PropertyMetadata(40d));
+    public static readonly DependencyProperty RowMinHeightProperty = DependencyProperty.Register(nameof(RowMinHeight), typeof(double), typeof(TableView), new PropertyMetadata(40d, OnRowHeightsChanged));
 
     /// <summary>
     /// Identifies the ShowExportOptions dependency property.
@@ -1211,6 +1211,25 @@ public partial class TableView
         }
     }
 #endif
+
+    /// <summary>
+    /// Pushes a changed <see cref="RowHeight"/>, <see cref="RowMinHeight"/> or <see cref="RowMaxHeight"/> to every
+    /// realised row's cells (Datgel DH-2718). The cells used to carry three RelativeSource bindings each to these
+    /// properties; on a 177-column row those 531 bindings were ~16 % of opening a wide table.
+    /// </summary>
+    private static void OnRowHeightsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is TableView tableView)
+        {
+            foreach (var row in tableView._rows)
+            {
+                foreach (var cell in row.Cells)
+                {
+                    cell.ApplyRowHeights(tableView);
+                }
+            }
+        }
+    }
 
     /// <summary>
     /// Handles changes to the IsReadOnly property.

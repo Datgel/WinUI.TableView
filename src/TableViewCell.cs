@@ -909,6 +909,26 @@ public partial class TableViewCell : ContentControl
     /// </summary>
     public TableView? TableView { get; internal set; }
 
+    /// <summary>
+    /// Sets this cell's Height, MinHeight and MaxHeight from <paramref name="tableView"/>'s row heights (Datgel DH-2718).
+    /// Called when the cell is created, when its row container is reused, and by TableView when a row height changes —
+    /// in place of three per-cell bindings. A value that is already right is not set again.
+    /// </summary>
+    internal void ApplyRowHeights(TableView tableView)
+    {
+        SetIfChanged(HeightProperty, Height, tableView.RowHeight);
+        SetIfChanged(MinHeightProperty, MinHeight, tableView.RowMinHeight);
+        SetIfChanged(MaxHeightProperty, MaxHeight, tableView.RowMaxHeight);
+
+        void SetIfChanged(DependencyProperty property, double current, double value)
+        {
+            // NaN != NaN, so an Auto height that stays Auto must be compared by IsNaN.
+            if (current.Equals(value))
+                return;
+            SetValue(property, value);
+        }
+    }
+
     /// <inheritdoc/>
     protected override AutomationPeer OnCreateAutomationPeer()
     {

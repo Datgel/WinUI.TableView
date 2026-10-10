@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Data;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Microsoft.VisualStudio.TestTools.UnitTesting.AppContainer;
 using System.Linq;
@@ -117,6 +118,33 @@ public class DeferredCellElementTests
 
         Assert.IsTrue(cells[ColumnCount - 2].IsSelected, "selection is by slot, so a deferred cell is selected like any other");
         Assert.IsNotNull(cells[ColumnCount - 2].Content, "and, now current, it has its element");
+    }
+
+    /// <summary>
+    /// Datgel DH-2695: a deferred cell has no TEMPLATE either - templating every cell of every realised row was the
+    /// largest remaining cost of opening a 177-column table - and gets it back with its element.
+    /// </summary>
+    [UITestMethod]
+    public async Task OffscreenCells_DeferTheirTemplate_UntilTheirElementIsBuilt()
+    {
+        var tableView = await CreateTableViewAsync();
+        var cells = Cells(tableView);
+        var last = cells[ColumnCount - 1];
+
+        Assert.IsFalse(cells[0].IsTemplateDeferred, "an on-screen cell has its template");
+        Assert.IsTrue(VisualTreeHelper.GetChildrenCount(cells[0]) > 0, "and its visual tree");
+        Assert.IsTrue(last.IsTemplateDeferred, "an off-screen cell has deferred its template");
+        Assert.AreEqual(0, VisualTreeHelper.GetChildrenCount(last), "so it has no visual tree at all");
+        Assert.AreEqual(ColumnWidth, last.ActualWidth, 0.5, "and still takes its column's width");
+        foreach (var cell in cells)
+            Assert.AreEqual(cell.IsElementDeferred, cell.IsTemplateDeferred, $"cell {cell.Index}: template deferred exactly when the element is");
+
+        tableView.SetValue(TableView.HorizontalOffsetProperty, (ColumnCount - 4) * ColumnWidth);
+        await SettleAsync(tableView);
+
+        Assert.IsFalse(last.IsTemplateDeferred, "the cell has scrolled into view and has its template back");
+        Assert.IsTrue(VisualTreeHelper.GetChildrenCount(last) > 0, "with its visual tree");
+        Assert.IsNotNull(last.Content, "and its element");
     }
 
     private static async Task SettleAsync(TableView tableView)

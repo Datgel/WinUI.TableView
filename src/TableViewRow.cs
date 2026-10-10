@@ -362,6 +362,12 @@ public partial class TableViewRow : ListViewItem
     {
         if (RowPresenter is not null && TableView is not null)
         {
+            // Datgel DH-2695: VisibleColumns materialises a fresh sorted list on every read, and adding a row read it once
+            // per cell here and twice more per cell in InsertCell - O(n^2 log n) per row, ~13 % of a 177-column open.
+            var visibleColumns = TableView.Columns.VisibleColumns;
+            var frozenColumns = visibleColumns.Where(x => x.IsFrozen).ToList();
+            var scrollableColumns = visibleColumns.Where(x => !x.IsFrozen).ToList();
+
             foreach (var column in columns)
             {
                 var cell = new TableViewCell
@@ -369,7 +375,7 @@ public partial class TableViewRow : ListViewItem
                     Row = this,
                     Column = column,
                     TableView = TableView,
-                    Index = TableView.Columns.VisibleColumns.IndexOf(column),
+                    Index = visibleColumns.IndexOf(column),
                     Width = column.ActualWidth
                 };
 
@@ -391,7 +397,7 @@ public partial class TableViewRow : ListViewItem
                     RelativeSource = new RelativeSource { Mode = RelativeSourceMode.Self }
                 });
 
-                RowPresenter.InsertCell(cell);
+                RowPresenter.InsertCell(cell, frozenColumns, scrollableColumns);
             }
         }
     }

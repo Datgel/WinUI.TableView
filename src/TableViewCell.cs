@@ -560,6 +560,7 @@ public partial class TableViewCell : ContentControl
         // DH-2231: a single-element column edits its resting element, so a deferred one must exist first.
         if (Column?.UseSingleElement is true)
             EnsureElement();
+        EnsureTemplate(); // DH-2695: a cell being edited is on screen, so it has its template
         var editingElement = SetEditingElement();
         IsElementDeferred = false;
         Content = editingElement;
@@ -629,6 +630,7 @@ public partial class TableViewCell : ContentControl
         if (ShouldDeferElement() && !IsArrangedInView())
         {
             IsElementDeferred = true;
+            DeferTemplate(); // DH-2695: nor its template - neither is needed until it comes into view
             if (Content is not null)
                 Content = null;
             return;
@@ -642,6 +644,43 @@ public partial class TableViewCell : ContentControl
     /// place, width, index and slot; <see cref="EnsureElement"/> builds the element.
     /// </summary>
     internal bool IsElementDeferred { get; private set; }
+
+    /// <summary>
+    /// Whether this cell has not applied its template because its element is deferred (Datgel DH-2695). It keeps its
+    /// column, width, index and slot but has no visual tree at all - no borders, presenter or grid line - until its
+    /// element is built.
+    /// </summary>
+    /// <remarks>
+    /// Templating every cell of every realised row was what remained of a wide table's first layout after DH-2231
+    /// deferred the elements: Datgel Hub's LOCATION, 177 columns x 42 rows (21 realised), took 14-18 s to open, and a
+    /// CPU trace put ~40 % of it in the cell template's Build.
+    /// </remarks>
+    internal bool IsTemplateDeferred { get; private set; }
+
+    /// <summary>
+    /// Withholds the template (a local <c>null</c> Template, which outranks the style's) until
+    /// <see cref="EnsureTemplate"/> (Datgel DH-2695) - the mechanism a deferred column header uses (DH-2252).
+    /// </summary>
+    internal void DeferTemplate()
+    {
+        if (IsTemplateDeferred)
+            return;
+        IsTemplateDeferred = true;
+        Template = null;
+    }
+
+    /// <summary>Gives a deferred cell its template back (the style's). Does nothing otherwise.</summary>
+    internal void EnsureTemplate()
+    {
+        if (!IsTemplateDeferred)
+            return;
+        IsTemplateDeferred = false;
+        ClearValue(TemplateProperty);
+        // Uno's Control.OnTemplateChanged neither applies the new template nor invalidates measure (DH-2252), and a
+        // cell's width is fixed, so nothing else would.
+        ApplyTemplate();
+        InvalidateMeasure();
+    }
 
     /// <summary>
     /// Builds the element of a cell whose element was deferred (Datgel DH-2231). Does nothing otherwise.
@@ -682,6 +721,7 @@ public partial class TableViewCell : ContentControl
     /// </summary>
     private void RealizeElement(bool focus)
     {
+        EnsureTemplate(); // DH-2695: a cell with an element has its template
         IsElementDeferred = false;
         var element = Column?.GenerateElement(this, Row?.Content);
 

@@ -459,6 +459,20 @@ public partial class TableViewRowPresenter : Control
         else if (_scrollableCellsPanel is not null)
         {
             var index = _scrollableColumns.IndexOf(column);
+            if (TableView.VirtualizesColumns)
+            {
+                // Datgel DH-2718: the panel holds only the realised cells, so the place is after every realised cell
+                // whose column comes earlier.
+                var at = 0;
+                foreach (var child in _scrollableCellsPanel.Children)
+                {
+                    if (child is TableViewCell { Column: { } other } && _scrollableColumns.IndexOf(other) < index)
+                        at++;
+                }
+
+                index = Math.Min(at, _scrollableCellsPanel.Children.Count);
+            }
+
             index = Math.Min(index, _scrollableColumns.Count);
             index = Math.Max(index, 0); // handles -ve index;
 
@@ -523,6 +537,54 @@ public partial class TableViewRowPresenter : Control
                     cell.Index = index;
             }
         }
+    }
+
+    /// <summary>
+    /// Places a virtualising row's realised scrollable cells where they would be if every column had a cell (Datgel
+    /// DH-2718): each takes, as its left margin, the width of the columns between it and the previous realised cell, and
+    /// the panel is at least as wide as all the scrollable columns. No-op when the table does not virtualise columns.
+    /// </summary>
+    internal void UpdateColumnGaps()
+    {
+        if (TableView is not { VirtualizesColumns: true } tableView || _scrollableCellsPanel is null)
+            return;
+
+        var starts = new Dictionary<TableViewColumn, double>();
+        var total = 0d;
+        foreach (var column in tableView.Columns.VisibleColumns)
+        {
+            if (column.IsFrozen)
+                continue;
+            starts[column] = total;
+            var width = TableViewRow.LayoutWidth(column);
+            total += double.IsNaN(width) ? 0 : width;
+        }
+
+        var end = 0d;
+        foreach (var child in _scrollableCellsPanel.Children)
+        {
+            if (child is not TableViewCell { Column: { } column } cell || !starts.TryGetValue(column, out var start))
+                continue;
+
+            var left = Math.Max(0, start - end);
+            if (cell.Margin.Left != left || cell.Margin.Right != 0 || cell.Margin.Top != 0 || cell.Margin.Bottom != 0)
+                cell.Margin = new Thickness(left, 0, 0, 0);
+            var width = TableViewRow.LayoutWidth(column);
+            end = start + (double.IsNaN(width) ? cell.Width : width);
+        }
+
+        if (_scrollableCellsPanel.MinWidth != total)
+            _scrollableCellsPanel.MinWidth = total;
+    }
+
+    /// <summary>Undoes <see cref="UpdateColumnGaps"/> when a table stops virtualising its columns (Datgel DH-2718).</summary>
+    internal void ResetColumnGaps()
+    {
+        if (_scrollableCellsPanel is null)
+            return;
+        _scrollableCellsPanel.ClearValue(MinWidthProperty);
+        foreach (var child in _scrollableCellsPanel.Children)
+            child.ClearValue(FrameworkElement.MarginProperty);
     }
 
     /// <summary>

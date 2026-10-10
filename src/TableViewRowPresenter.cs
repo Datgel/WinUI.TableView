@@ -434,10 +434,19 @@ public partial class TableViewRowPresenter : Control
     /// <param name="cell">The cell to insert.</param>
     public void InsertCell(TableViewCell cell)
     {
-        if (TableView is null || cell is not { Column: { } column }) return;
+        if (TableView is null) return;
 
-        var _frozenColumns = TableView.Columns.VisibleColumns.Where(x => x.IsFrozen).ToList();
-        var _scrollableColumns = TableView.Columns.VisibleColumns.Where(x => !x.IsFrozen).ToList();
+        var visibleColumns = TableView.Columns.VisibleColumns;
+        InsertCell(cell, visibleColumns.Where(x => x.IsFrozen).ToList(), visibleColumns.Where(x => !x.IsFrozen).ToList());
+    }
+
+    /// <summary>
+    /// Inserts a cell given the visible frozen and scrollable columns, so a caller adding a whole row of cells reads
+    /// <see cref="TableViewColumnsCollection.VisibleColumns"/> once rather than twice per cell (Datgel DH-2695).
+    /// </summary>
+    internal void InsertCell(TableViewCell cell, IList<TableViewColumn> _frozenColumns, IList<TableViewColumn> _scrollableColumns)
+    {
+        if (TableView is null || cell is not { Column: { } column }) return;
 
         if (cell is { Column.IsFrozen: true } && _frozenCellsPanel is not null)
         {

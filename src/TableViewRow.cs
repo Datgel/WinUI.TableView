@@ -156,6 +156,13 @@ public partial class TableViewRow : ListViewItem
                     cell.Width = cell.Column.ActualWidth;
                 }
 
+                // Datgel DH-2718: likewise the row heights — a recycled container is out of TableView's row list while
+                // off-screen, so a RowHeight change pushed meanwhile did not reach its cells.
+                if (TableView is not null)
+                {
+                    cell.ApplyRowHeights(TableView);
+                }
+
                 cell.RefreshElement();
             }
         }
@@ -379,23 +386,9 @@ public partial class TableViewRow : ListViewItem
                     Width = column.ActualWidth
                 };
 
-                cell.SetBinding(HeightProperty, new Binding
-                {
-                    Path = new PropertyPath($"{nameof(TableViewCell.TableView)}.{nameof(TableView.RowHeight)}"),
-                    RelativeSource = new RelativeSource { Mode = RelativeSourceMode.Self }
-                });
-
-                cell.SetBinding(MaxHeightProperty, new Binding
-                {
-                    Path = new PropertyPath($"{nameof(TableViewCell.TableView)}.{nameof(TableView.RowMaxHeight)}"),
-                    RelativeSource = new RelativeSource { Mode = RelativeSourceMode.Self }
-                });
-
-                cell.SetBinding(MinHeightProperty, new Binding
-                {
-                    Path = new PropertyPath($"{nameof(TableViewCell.TableView)}.{nameof(TableView.RowMinHeight)}"),
-                    RelativeSource = new RelativeSource { Mode = RelativeSourceMode.Self }
-                });
+                // Datgel DH-2718: set once and pushed by TableView's RowHeight/RowMinHeight/RowMaxHeight callbacks, not
+                // three RelativeSource bindings per cell (531 per 177-column row, ~16 % of a wide table's open).
+                cell.ApplyRowHeights(TableView);
 
                 RowPresenter.InsertCell(cell, frozenColumns, scrollableColumns);
             }

@@ -906,7 +906,55 @@ public partial class TableView
     {
         _headerRow?.InvalidateArrange();
         foreach (var row in _rows)
+        {
+            // Datgel DH-2718: a width change can bring columns into view that a virtualising row has no cell for yet.
+            row?.RealizeColumnsInView();
             row?.RowPresenter?.InvalidateArrange();
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets whether a row creates cells only for the columns within <see cref="HorizontalCulling.Margin"/> of the
+    /// horizontal viewport (Datgel DH-2718). Off by default. A row otherwise creates a cell for EVERY visible column, and
+    /// creating them (a control per column, inserted into the row's panel) was most of what opening a 177-column table
+    /// still cost once off-screen cells deferred their element and template (DH-2231, DH-2695).
+    /// </summary>
+    /// <remarks>
+    /// <para>With it on, a row's <see cref="TableViewRowPresenter.Cells"/> holds only the realised cells, in column order,
+    /// each with its <see cref="TableViewCell.Index"/>; the columns between two realised cells are a left margin on the
+    /// second, so every realised cell sits exactly where it would without virtualisation. Cells are added as columns
+    /// scroll into view (and kept when they scroll away), and a cell asked for by slot (the current cell, an edit, a
+    /// selection by keyboard) is created on demand.</para>
+    /// <para>Always realised, wherever they are: frozen columns, auto-width columns (measured from their cells) and
+    /// columns with <see cref="TableViewColumn.AlwaysRealizeElement"/> — a wrapping column that decides the row's height
+    /// therefore still does, so a row's height does not change as it scrolls sideways.</para>
+    /// </remarks>
+    public bool VirtualizesColumns
+    {
+        get => _virtualizesColumns;
+        set
+        {
+            if (_virtualizesColumns == value)
+                return;
+            _virtualizesColumns = value;
+            foreach (var row in _rows)
+                row?.RebuildCells();
+        }
+    }
+
+    private bool _virtualizesColumns;
+
+    /// <summary>
+    /// The horizontal band, in the scrollable cells panel's coordinates, a virtualising row realises cells for
+    /// (Datgel DH-2718): the viewport plus <see cref="HorizontalCulling.Margin"/> either side. Before the table has a
+    /// width (its first layout) the window's width stands in for it, so a first open realises a screenful, not nothing.
+    /// </summary>
+    internal (double Left, double Width) ColumnRealizationBand()
+    {
+        var width = ActualWidth > 0 ? ActualWidth
+            : XamlRoot?.Size.Width is > 0 and var rootWidth ? rootWidth
+            : 1920;
+        return (HorizontalOffset - HorizontalCulling.Margin, width + 2 * HorizontalCulling.Margin);
     }
 
     private bool _cullsOffscreenColumns = true;
@@ -1435,6 +1483,7 @@ public partial class TableView
 
             foreach (var row in tableView._rows)
             {
+                row?.RealizeColumnsInView(); // Datgel DH-2718: the columns scrolled into view get their cells
                 row?.RowPresenter?.InvalidateArrange();
             }
         }

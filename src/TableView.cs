@@ -2781,12 +2781,12 @@ public partial class TableView : ListView
         if ((cellLeft >= viewportLeft && cellRight <= viewportRight) ||
             xOffset == HorizontalOffset)
         {
-            return row.Cells.ElementAt(slot.Column);
+            return row.GetCell(slot.Column)!;
         }
 
         SetValue(HorizontalOffsetProperty, xOffset);
 
-        return row?.Cells.ElementAt(slot.Column)!;
+        return row?.GetCell(slot.Column)!;
     }
 
     /// <summary>
@@ -2850,7 +2850,7 @@ public partial class TableView : ListView
     /// </summary>
     internal TableViewCell? GetCellFromSlot(TableViewCellSlot slot)
     {
-        return slot.IsValid(this) && ContainerFromIndex(slot.Row) is TableViewRow row ? row.Cells[slot.Column] : default;
+        return slot.IsValid(this) && ContainerFromIndex(slot.Row) is TableViewRow row ? row.GetCell(slot.Column) : default;
     }
 
     /// <summary>

@@ -165,6 +165,12 @@ public partial class TableViewRow : ListViewItem
 
                 cell.RefreshElement();
             }
+
+            // Datgel DH-2718: and the columns — a recycled container is out of TableView's row list while off-screen,
+            // so a sideways scroll meanwhile did not create the cells of the columns it brought into view, and the
+            // reused row came back missing them. Gaps are re-placed too, for a width change it missed.
+            RowPresenter?.UpdateColumnGaps();
+            RealizeColumnsInView();
         }
 
         RowPresenter?.InvalidateMeasure(); // The cells presenter does not measure every time.

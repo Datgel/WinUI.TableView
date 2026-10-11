@@ -250,6 +250,8 @@ public partial class TableView : ListView
                 }
 
                 row.TableView = this;
+                // Datgel DH-2718: a row re-prepared after it was cleared missed every sideways scroll in between.
+                row.RealizeColumnsInView();
                 row.EnsureCellsStyle(default, item);
 
                 _pendingCellStateRows.Add(row.Index);

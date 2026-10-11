@@ -2233,6 +2233,13 @@ public partial class TableView : ListView
             return;
         }
 
+        // Datgel DH-2751: read the current cell BEFORE deselecting. DeselectAllCells sets CurrentCellSlot
+        // to null, so the "SelectionStartCellSlot ??= CurrentCellSlot" fallback below always read null.
+        // A click ends in EndDragSelection, which clears SelectionStartCellSlot, so Shift+arrow or
+        // Shift+click after a click anchored at the NEW slot and selected one cell instead of extending
+        // the block from the clicked cell.
+        var currentBeforeDeselect = CurrentCellSlot;
+
         if (!ctrlKey || !(SelectionMode is ListViewSelectionMode.Multiple or ListViewSelectionMode.Extended))
         {
             if (SelectionUnit is TableViewSelectionUnit.CellWithRow)
@@ -2256,7 +2263,7 @@ public partial class TableView : ListView
             SelectedCellRanges.Remove(selectionRange!);
         }
 
-        SelectionStartCellSlot ??= CurrentCellSlot;
+        SelectionStartCellSlot ??= currentBeforeDeselect;
         SelectionStartCellSlot ??= slot;
 
         if (shiftKey && SelectionMode is ListViewSelectionMode.Multiple or ListViewSelectionMode.Extended)

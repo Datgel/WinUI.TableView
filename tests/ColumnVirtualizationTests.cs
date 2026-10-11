@@ -128,6 +128,30 @@ public class ColumnVirtualizationTests
     }
 
     [UITestMethod]
+    public async Task ARecycledRow_HasTheCellsOfTheColumnsScrolledIntoViewWhileItWasAway()
+    {
+        var tableView = await CreateTableViewAsync(itemCount: 300);
+        tableView.SetValue(TableView.HorizontalOffsetProperty, (ColumnCount - 4) * ColumnWidth);
+        await SettleAsync(tableView);
+
+        // Scroll to the bottom: the rows now shown are containers recycled from rows cleared at the top - some of them
+        // cleared before the sideways scroll above, so it never reached them.
+        tableView.ScrollIntoView(tableView.Items[^1]);
+        await SettleAsync(tableView);
+
+        var rows = tableView.FindDescendants().OfType<TableViewRow>()
+            .Where(r => r.Visibility == Visibility.Visible && r.Index >= 0 && ReferenceEquals(tableView.ContainerFromIndex(r.Index), r))
+            .ToList();
+        Assert.IsTrue(rows.Count > 0 && rows.All(r => r.Index > 100), "Precondition: the rows shown are far down the list");
+        foreach (var row in rows)
+        {
+            var last = row.Cells.SingleOrDefault(c => c.Index == ColumnCount - 1);
+            Assert.IsNotNull(last, $"row {row.Index} has the cell of the column in view");
+            Assert.AreEqual((ColumnCount - 1) * ColumnWidth, last!.ActualOffset.X, 0.5, $"row {row.Index}: in its own place");
+        }
+    }
+
+    [UITestMethod]
     public async Task OffByDefault_EveryColumnHasACell()
     {
         var tableView = await CreateTableViewAsync(virtualize: false);
@@ -155,7 +179,7 @@ public class ColumnVirtualizationTests
     private static TableViewCell[] FirstRowCells(TableView tableView) =>
         Panel(tableView).Children.OfType<TableViewCell>().ToArray();
 
-    private static async Task<TableView> CreateTableViewAsync(int alwaysRealize = -1, bool virtualize = true)
+    private static async Task<TableView> CreateTableViewAsync(int alwaysRealize = -1, bool virtualize = true, int itemCount = 2)
     {
         var tableView = new TableView
         {
@@ -176,7 +200,9 @@ public class ColumnVirtualizationTests
             });
         }
 
-        tableView.ItemsSource = new[] { new VirtualTestItem { Name = "Alpha" }, new VirtualTestItem { Name = "Beta" } };
+        tableView.ItemsSource = itemCount == 2
+            ? new[] { new VirtualTestItem { Name = "Alpha" }, new VirtualTestItem { Name = "Beta" } }
+            : Enumerable.Range(0, itemCount).Select(i => new VirtualTestItem { Name = $"Item {i}" }).ToArray();
         await UnitTestApp.Current.MainWindow.LoadTestContentAsync(tableView);
         tableView.UpdateLayout();
         await SettleAsync(tableView);

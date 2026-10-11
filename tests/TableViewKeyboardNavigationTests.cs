@@ -190,6 +190,66 @@ public class TableViewKeyboardNavigationTests
         Assert.IsTrue(tableView.IsEditing);
     }
 
+    // Datgel DH-2751: Shift+arrow and Shift+click after a click must extend the block from the CLICKED cell.
+    // Before the fix, SelectCells read CurrentCellSlot as its anchor fallback only after DeselectAll had
+    // set it to null, so a click (which leaves SelectionStartCellSlot null) followed by Shift+Down selected
+    // one cell: the new one.
+
+    [UITestMethod]
+    public async Task Shift_Down_after_a_click_extends_the_block_from_the_clicked_cell()
+    {
+        var tableView = await CreateTableViewAsync();
+        await ClickAsync(tableView, new TableViewCellSlot(0, 1));
+
+        Assert.IsTrue(tableView.NavigateFromCurrentCell(VirtualKey.Down, shiftKey: true));
+
+        AssertSelected(tableView, (0, 1), (1, 1));
+        Assert.AreEqual(new TableViewCellSlot(1, 1), tableView.CurrentCellSlot);
+    }
+
+    [UITestMethod]
+    public async Task A_second_Shift_Down_keeps_the_clicked_cell_as_the_anchor()
+    {
+        var tableView = await CreateTableViewAsync();
+        await ClickAsync(tableView, new TableViewCellSlot(0, 0));
+
+        tableView.NavigateFromCurrentCell(VirtualKey.Down, shiftKey: true);
+        tableView.NavigateFromCurrentCell(VirtualKey.Down, shiftKey: true);
+
+        AssertSelected(tableView, (0, 0), (1, 0), (2, 0));
+    }
+
+    [UITestMethod]
+    public async Task Shift_click_after_a_click_selects_the_rectangle_between_them()
+    {
+        var tableView = await CreateTableViewAsync();
+        await ClickAsync(tableView, new TableViewCellSlot(0, 0));
+
+        tableView.MakeSelection(new TableViewCellSlot(1, 1), shiftKey: true);
+
+        AssertSelected(tableView, (0, 0), (0, 1), (1, 0), (1, 1));
+    }
+
+    /// <summary>
+    /// The state a pointer click leaves: the clicked cell selected and current, and no selection anchor,
+    /// because <c>TableView.EndDragSelection</c> clears <c>SelectionStartCellSlot</c> on release.
+    /// </summary>
+    private static async Task ClickAsync(TableView tableView, TableViewCellSlot slot)
+    {
+        await MakeCurrentAsync(tableView, slot);
+        tableView.SelectionStartCellSlot = null;
+    }
+
+    private static void AssertSelected(TableView tableView, params (int Row, int Column)[] expected)
+    {
+        foreach (var (row, column) in expected)
+        {
+            Assert.IsTrue(tableView.IsCellInSelection(new TableViewCellSlot(row, column)), $"cell ({row}, {column}) should be selected");
+        }
+
+        Assert.AreEqual(expected.Length, tableView.SelectedCells.Count, "selected cell count");
+    }
+
     private static TableViewCell? CurrentCell(TableView tableView)
     {
         return tableView.CurrentCellSlot is { } slot ? tableView.GetCellFromSlot(slot) : null;

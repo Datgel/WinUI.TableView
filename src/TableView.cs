@@ -270,6 +270,8 @@ public partial class TableView : ListView
                 row.TableView = this;
                 // A recycled row has no TableView while its content changes, so that pass can't restyle it.
                 row.EnsureAlternateColors();
+                // Datgel DH-2718: a row re-prepared after it was cleared missed every sideways scroll in between.
+                row.RealizeColumnsInView();
                 row.EnsureCellsStyle(default, item);
 
                 _pendingCellStateRows.Add(row.Index);

@@ -563,7 +563,7 @@ public partial class TableViewColumnHeader : ContentControl
     internal static double ResizeAreaWidth(double configured, PointerDeviceType deviceType)
     {
         var width = double.IsNaN(configured) || configured < 1 ? 1 : configured;
-        return deviceType == PointerDeviceType.Touch ? Math.Max(width, TouchResizeAreaWidth) : width;
+        return deviceType == PointerDeviceType.Touch ? 8 : 4;
     }
 
     /// <summary>
@@ -571,7 +571,7 @@ public partial class TableViewColumnHeader : ContentControl
     /// Pure, so it is directly unit-testable.
     /// </summary>
     internal static bool IsInRightResizeArea(double x, double y, double headerWidth, double gripHeight, double areaWidth) =>
-        x >= headerWidth - areaWidth && y < gripHeight;
+        x > headerWidth - areaWidth && y < gripHeight;
 
     /// <summary>
     /// Whether a point <paramref name="x"/> DIP from a header's left edge is inside the grip at its LEFT edge (the

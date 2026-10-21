@@ -2,7 +2,7 @@ name: ci-build
 
 on:
   push:
-    branches: main
+    branches: [ main, 'ci/**' ]
     paths-ignore:
       - 'docs/**'
       - 'samples/**'

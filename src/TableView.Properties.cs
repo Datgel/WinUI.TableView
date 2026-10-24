@@ -909,6 +909,7 @@ public partial class TableView
     /// </summary>
     internal void RefreshCulling()
     {
+        _headerRow?.RealizeHeadersInView(); // Datgel DH-3839
         _headerRow?.InvalidateArrange();
         foreach (var row in _rows)
         {
@@ -1006,6 +1007,36 @@ public partial class TableView
     }
 
     private bool _defersOffscreenColumnHeaders = true;
+
+    /// <summary>
+    /// Gets or sets whether only the column headers near the horizontal viewport are elements in the visual tree
+    /// (Datgel DH-3839). Off by default. Every visible column still has its <see cref="TableViewColumn.HeaderControl"/>,
+    /// with its width, sort and filter state, but a header beyond the band <see cref="VirtualizesColumns"/> uses (the
+    /// viewport plus <c>HorizontalCulling.Margin</c> either side) is not in the header row's panel until it scrolls into
+    /// that band; it is then inserted and kept. <see cref="TableViewColumnHeader.IsRealized"/> says which are in.
+    /// </summary>
+    /// <remarks>
+    /// <para>A deferred template (<see cref="DefersOffscreenColumnHeaders"/>) still left one element per column in the
+    /// tree. On Uno's Win32 head each element entering the tree gets a UI Automation provider and raises a bounding-box
+    /// event on every arrange, so a 178-column table paid for 178 header elements on its first layout while about a dozen
+    /// were on screen (measured in Datgel Hub, DH-3839).</para>
+    /// <para>Always realised, wherever they are: frozen columns and columns whose width is not absolute (auto is measured
+    /// from its header, star from the table). The columns between two realised headers are a left margin on the second,
+    /// so every realised header sits exactly where it would without virtualisation.</para>
+    /// </remarks>
+    public bool VirtualizesColumnHeaders
+    {
+        get => _virtualizesColumnHeaders;
+        set
+        {
+            if (_virtualizesColumnHeaders == value)
+                return;
+            _virtualizesColumnHeaders = value;
+            _headerRow?.RebuildHeaders();
+        }
+    }
+
+    private bool _virtualizesColumnHeaders;
 
     /// <summary>
     /// Gets the actual width of the row header.
@@ -1496,6 +1527,7 @@ public partial class TableView
     {
         if (d is TableView { _headerRow: { } } tableView)
         {
+            tableView._headerRow.RealizeHeadersInView(); // Datgel DH-3839: the headers scrolled into view become elements
             tableView._headerRow.InvalidateArrange();
 
             foreach (var row in tableView._rows)

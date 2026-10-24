@@ -228,7 +228,8 @@ public partial class TableViewCell : ContentControl
             var bordersRect = new Rect(0, 0, _resizePreviewMaxWidth, finalSize.Height);
             _backgroundBorder?.Arrange(bordersRect);
             _selectionBorder?.Arrange(bordersRect);
-            _rootBorder?.Arrange(new Rect(0, 0, _resizePreviewWidth, finalSize.Height));
+            // Datgel DH-3839: the default template has no RootBorder; its presenter is the layer that was inside it.
+            ((FrameworkElement?)_rootBorder ?? _contentPresenter)?.Arrange(new Rect(0, 0, _resizePreviewWidth, finalSize.Height));
         }
 
         return finalSize;

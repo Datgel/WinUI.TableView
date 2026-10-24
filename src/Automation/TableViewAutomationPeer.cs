@@ -92,7 +92,8 @@ public partial class TableViewAutomationPeer : ListViewAutomationPeer, IGridProv
 
         foreach (var column in Table.Columns.VisibleColumns)
         {
-            if (column.HeaderControl is { Visibility: Visibility.Visible } header
+            // Datgel DH-3839: a header the row has not realised has no place in the tree, so it has no peer either.
+            if (column.HeaderControl is { Visibility: Visibility.Visible, IsRealized: true } header
                 && (FromElement(header) ?? CreatePeerForElement(header)) is { } peer)
             {
                 peers.Add(peer);

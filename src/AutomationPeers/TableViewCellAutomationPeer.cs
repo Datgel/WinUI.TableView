@@ -197,7 +197,7 @@ public partial class TableViewCellAutomationPeer : FrameworkElementAutomationPee
     /// </summary>
     public IRawElementProviderSimple[] GetColumnHeaderItems()
     {
-        if (_owner.Column?.HeaderControl is not { } headerControl)
+        if (_owner.Column?.HeaderControl is not { IsRealized: true } headerControl) // Datgel DH-3839
         {
             return [];
         }

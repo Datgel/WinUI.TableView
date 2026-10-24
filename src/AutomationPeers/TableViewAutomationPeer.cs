@@ -125,7 +125,8 @@ public partial class TableViewAutomationPeer : ListViewAutomationPeer, IGridProv
 
         foreach (var column in _owner.Columns.VisibleColumns)
         {
-            if (column.HeaderControl is { } headerControl)
+            // Datgel DH-3839: only the headers the row has realised are in the tree.
+            if (column.HeaderControl is { IsRealized: true } headerControl)
             {
                 var peer = CreatePeerForElement(headerControl);
                 if (peer is not null)

@@ -85,7 +85,7 @@ public partial class TableViewCellAutomationPeer : FrameworkElementAutomationPee
     /// <inheritdoc/>
     public IRawElementProviderSimple[] GetColumnHeaderItems()
     {
-        return Cell.Column?.HeaderControl is { } header
+        return Cell.Column?.HeaderControl is { IsRealized: true } header // Datgel DH-3839
                && Cell.TableView is { } tableView
                && AreColumnHeadersVisible(tableView)
                && ProviderFor(header) is { } provider

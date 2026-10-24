@@ -85,9 +85,12 @@ public partial class TableViewCellAutomationPeer : FrameworkElementAutomationPee
     /// <inheritdoc/>
     public IRawElementProviderSimple[] GetColumnHeaderItems()
     {
-        return Cell.Column?.HeaderControl is { IsRealized: true } header // Datgel DH-3839
-               && Cell.TableView is { } tableView
+        // Datgel DH-3839: the cell may exist where its header was not realised (an always-realised column, a cell
+        // created by slot); realise the header so the item named is in the tree.
+        return Cell.TableView is { } tableView
+               && Cell.Column is { } column
                && AreColumnHeadersVisible(tableView)
+               && tableView.RealizeColumnHeader(column) is { } header
                && ProviderFor(header) is { } provider
             ? [provider]
             : [];

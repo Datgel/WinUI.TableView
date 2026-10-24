@@ -118,6 +118,37 @@ public class ColumnHeaderVirtualizationTests
     }
 
     [UITestMethod]
+    public async Task AnAlwaysRealizedColumn_HasItsHeaderRealisedWhereverItIs()
+    {
+        var tableView = await CreateTableViewAsync(alwaysRealize: ColumnCount - 1);
+
+        Assert.IsTrue(tableView.Columns[ColumnCount - 1].HeaderControl!.IsRealized,
+            "a column whose cells always exist has its header too, so every cell's header item is in the tree");
+        Assert.IsFalse(tableView.Columns[ColumnCount - 2].HeaderControl!.IsRealized, "its off-screen neighbour is still not realised");
+    }
+
+    [UITestMethod]
+    public async Task AnOffscreenCellsPeer_NamesItsHeaderItem_RealisingTheHeader()
+    {
+        var tableView = await CreateTableViewAsync(virtualizeCells: true);
+        var column = tableView.Columns[ColumnCount - 3];
+        Assert.IsFalse(column.HeaderControl!.IsRealized, "Precondition: the column's header is not realised");
+        var row = tableView.ContainerFromIndex(0) as TableViewRow;
+        Assert.IsNotNull(row, "Precondition: the first row is realised");
+        var cell = row!.RealizeCell(column);
+        Assert.IsNotNull(cell, "Precondition: the off-screen cell can be created by column");
+
+        var peer = FrameworkElementAutomationPeer.FromElement(cell!) ?? FrameworkElementAutomationPeer.CreatePeerForElement(cell!);
+        var tableItem = peer!.GetPattern(PatternInterface.TableItem) as ITableItemProvider;
+        Assert.IsNotNull(tableItem, "Precondition: the cell peer is a table item");
+
+        Assert.AreEqual(1, tableItem!.GetColumnHeaderItems().Length, "the cell names its column's header item");
+        Assert.IsTrue(column.HeaderControl.IsRealized, "which is realised so that the item named is in the tree");
+        await SettleAsync(tableView);
+        Assert.AreEqual((ColumnCount - 3) * ColumnWidth, X(column.HeaderControl, tableView), 0.5, "in its own place");
+    }
+
+    [UITestMethod]
     public async Task HidingAndReorderingColumns_KeepsTheRealisedHeadersInOrder()
     {
         var tableView = await CreateTableViewAsync();
@@ -197,7 +228,7 @@ public class ColumnHeaderVirtualizationTests
         }
     }
 
-    private static async Task<TableView> CreateTableViewAsync(int autoWidth = -1, int frozen = 0, bool virtualize = true)
+    private static async Task<TableView> CreateTableViewAsync(int autoWidth = -1, int frozen = 0, bool virtualize = true, int alwaysRealize = -1, bool virtualizeCells = false)
     {
         var tableView = new TableView
         {
@@ -205,6 +236,7 @@ public class ColumnHeaderVirtualizationTests
             Height = 300,
             AutoGenerateColumns = false,
             VirtualizesColumnHeaders = virtualize,
+            VirtualizesColumns = virtualizeCells,
             FrozenColumnCount = frozen,
         };
 
@@ -214,6 +246,7 @@ public class ColumnHeaderVirtualizationTests
             {
                 Header = $"Column {i}",
                 Width = i == autoWidth ? GridLength.Auto : new GridLength(ColumnWidth),
+                AlwaysRealizeElement = i == alwaysRealize,
                 Binding = new Binding { Path = new PropertyPath(nameof(HeaderTestItem.Name)) }
             });
         }

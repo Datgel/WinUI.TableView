@@ -197,7 +197,8 @@ public partial class TableViewCellAutomationPeer : FrameworkElementAutomationPee
     /// </summary>
     public IRawElementProviderSimple[] GetColumnHeaderItems()
     {
-        if (_owner.Column?.HeaderControl is not { IsRealized: true } headerControl) // Datgel DH-3839
+        // Datgel DH-3839: realise the header if the cell exists where its header was not realised.
+        if (_owner.Column is not { } column || _owner.TableView?.RealizeColumnHeader(column) is not { } headerControl)
         {
             return [];
         }

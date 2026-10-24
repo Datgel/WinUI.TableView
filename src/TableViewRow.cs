@@ -451,7 +451,7 @@ public partial class TableViewRow : ListViewItem
         : double.NaN;
 
     /// <summary>Where each scrollable column starts in the scrollable cells panel (Datgel DH-2718).</summary>
-    private static Dictionary<TableViewColumn, double> ColumnStarts(IList<TableViewColumn> scrollableColumns)
+    internal static Dictionary<TableViewColumn, double> ColumnStarts(IList<TableViewColumn> scrollableColumns)
     {
         var starts = new Dictionary<TableViewColumn, double>(scrollableColumns.Count);
         var x = 0d;

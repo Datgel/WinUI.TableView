@@ -447,6 +447,15 @@ public partial class TableViewColumnHeader : ContentControl
     internal bool IsTemplateDeferred { get; private set; }
 
     /// <summary>
+    /// Gets whether this header is an element in the header row's visual tree (Datgel fork, DH-3839). Always true once
+    /// the header row has placed it, unless the table virtualises its headers
+    /// (<see cref="TableView.VirtualizesColumnHeaders"/>) and this column is outside the realisation band: such a
+    /// header keeps its column, width and state, but has no place, size, template or UI Automation peer until it
+    /// scrolls into view. Never transform, measure or hit-test a header that is not realised.
+    /// </summary>
+    public bool IsRealized { get; internal set; }
+
+    /// <summary>
     /// Withholds the template (a local <c>null</c> Template, which outranks the style's) until
     /// <see cref="EnsureTemplate"/> (Datgel fork, DH-2252).
     /// </summary>

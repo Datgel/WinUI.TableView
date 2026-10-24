@@ -344,6 +344,13 @@ public partial class TableViewHeaderRow : Control
         {
             _calculatingHeaderWidths = true;
 
+            // Datgel DH-3839: a column that just became auto-width is measured from its header below, so it must be in
+            // the tree first (an auto column is always realised).
+            if (TableView.VirtualizesColumnHeaders)
+            {
+                RealizeHeadersInView();
+            }
+
             var allColumns = TableView.Columns.VisibleColumns.ToList();
             var starColumns = allColumns.Where(x => x.Width.IsStar).ToList();
             var autoColumns = allColumns.Where(x => x.Width.IsAuto).ToList();

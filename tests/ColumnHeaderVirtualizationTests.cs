@@ -103,6 +103,21 @@ public class ColumnHeaderVirtualizationTests
     }
 
     [UITestMethod]
+    public async Task AnOffscreenColumnMadeAutoWidth_IsRealisedAndMeasuredFromItsHeader()
+    {
+        var tableView = await CreateTableViewAsync();
+        var column = tableView.Columns[ColumnCount - 5];
+        Assert.IsFalse(column.HeaderControl!.IsRealized, "Precondition: the column's header is not realised");
+
+        column.Width = GridLength.Auto;
+        await SettleAsync(tableView);
+
+        Assert.IsTrue(column.HeaderControl!.IsRealized, "an auto-width column is measured from its header, so it is realised");
+        Assert.IsTrue(column.HeaderControl.CachedDesiredWidth > 0, "and its header was measured");
+        Assert.IsTrue(column.ActualWidth > 0, "and the column has a width");
+    }
+
+    [UITestMethod]
     public async Task HidingAndReorderingColumns_KeepsTheRealisedHeadersInOrder()
     {
         var tableView = await CreateTableViewAsync();

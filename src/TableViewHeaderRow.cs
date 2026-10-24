@@ -822,11 +822,32 @@ public partial class TableViewHeaderRow : Control
     /// </summary>
     private static bool MustRealizeHeader(TableViewColumn column, Dictionary<TableViewColumn, double> starts, (double Left, double Width) band)
     {
-        if (column.IsFrozen || !column.Width.IsAbsolute || !starts.TryGetValue(column, out var start))
+        // AlwaysRealizeElement: a row always has that column's cell, and a cell's peer names its header item, so the
+        // header must exist wherever the cell does (the rows' MustRealize rule).
+        if (column.IsFrozen || column.AlwaysRealizeElement || !column.Width.IsAbsolute || !starts.TryGetValue(column, out var start))
             return true;
 
         var width = TableViewRow.LayoutWidth(column);
         return double.IsNaN(width) || HorizontalCulling.IsInView(start, width, band.Left, band.Width, margin: 0);
+    }
+
+    /// <summary>
+    /// Realises the header of <paramref name="column"/> now, wherever it is, and returns it (Datgel DH-3839): for a
+    /// cell created on demand off screen (<c>TableViewRow.RealizeCell</c>) whose peer is asked for its header item.
+    /// Null when the column has no header (hidden) or the row is not templated.
+    /// </summary>
+    internal TableViewColumnHeader? RealizeHeader(TableViewColumn column)
+    {
+        if (column.HeaderControl is not { } header || header.Column != column)
+            return null;
+
+        if (!header.IsRealized && TableView?.VirtualizesColumnHeaders is true)
+        {
+            InsertRealizedHeader(header, column);
+            UpdateHeaderGaps();
+        }
+
+        return header.IsRealized ? header : null;
     }
 
     /// <summary>

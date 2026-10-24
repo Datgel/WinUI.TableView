@@ -1039,6 +1039,14 @@ public partial class TableView
     private bool _virtualizesColumnHeaders;
 
     /// <summary>
+    /// The header of <paramref name="column"/>, realised now if the table virtualises its headers and it is not yet
+    /// (Datgel DH-3839). For a cell peer asked for its header item: a cell may exist off screen (always-realised
+    /// columns, a cell created by slot) where its header was not realised. Null when there is no realised header.
+    /// </summary>
+    internal TableViewColumnHeader? RealizeColumnHeader(TableViewColumn column) =>
+        _headerRow?.RealizeHeader(column) ?? (column.HeaderControl is { IsRealized: true } header ? header : null);
+
+    /// <summary>
     /// Gets the actual width of the row header.
     /// </summary>
     public double RowHeaderActualWidth => (double)GetValue(RowHeaderActualWidthProperty);

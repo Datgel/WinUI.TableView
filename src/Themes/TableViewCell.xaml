@@ -33,7 +33,7 @@
                                 <VisualState x:Name="Normal" />
                                 <VisualState x:Name="PointerOver">
                                     <VisualState.Setters>
-                                        <Setter Target="RootBorder.Background"
+                                        <Setter Target="Content.Background"
                                                 Value="{ThemeResource TableViewCellBackgroundPointerOver}" />
                                     </VisualState.Setters>
                                 </VisualState>
@@ -66,13 +66,16 @@
                                 BorderThickness="{ThemeResource TableViewCellSelectionBorderThickness}"
                                 CornerRadius="{ThemeResource TableViewRowCellSelectionBorderCornerRadius}" />
 
-                        <Border x:Name="RootBorder"
-                                CornerRadius="{ThemeResource TableViewRowCellSelectionBorderCornerRadius}">
-                            <ContentPresenter x:Name="Content"
-                                              Margin="{TemplateBinding Padding}"
-                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
-                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
-                        </Border>
+                        <!-- Datgel fork (DH-3839): the presenter IS the pointer-over layer. It used to sit inside a
+                             RootBorder that only carried that background; a ContentPresenter has its own Background,
+                             CornerRadius and Padding, so the Border was one more element per cell (403 on a wide
+                             table's first layout, each with a UI Automation provider on Uno's Win32 head). A template
+                             that still declares a RootBorder keeps working: TableViewCell looks it up by name. -->
+                        <ContentPresenter x:Name="Content"
+                                          CornerRadius="{ThemeResource TableViewRowCellSelectionBorderCornerRadius}"
+                                          Padding="{TemplateBinding Padding}"
+                                          VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}" />
 
                         <Rectangle x:Name="VerticalGridLine"
                                    Grid.Column="1"

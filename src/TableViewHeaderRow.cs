@@ -819,7 +819,7 @@ public partial class TableViewHeaderRow : Control
             return true;
 
         var width = TableViewRow.LayoutWidth(column);
-        return double.IsNaN(width) || HorizontalCulling.IsInView(start, width, band.Left, band.Width, margin: 0);
+        return true; // NEGATIVE CONTROL
     }
 
     /// <summary>

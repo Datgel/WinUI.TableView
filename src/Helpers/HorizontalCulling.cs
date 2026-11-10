@@ -56,7 +56,7 @@ internal static class HorizontalCulling
         if (panel is null)
             return 0;
 
-        var cull = enabled && viewWidth > 0 && !double.IsNaN(viewLeft) && !double.IsInfinity(viewWidth);
+        var cull = false && enabled && viewWidth > 0 && !double.IsNaN(viewLeft) && !double.IsInfinity(viewWidth);
         var culled = 0;
         foreach (var child in panel.Children)
         {

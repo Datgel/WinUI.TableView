@@ -57,8 +57,8 @@ public class DatgelAutomationPeerTests
         Assert.AreEqual(3, grid.RowCount);
         Assert.AreEqual(4, grid.ColumnCount);
         Assert.IsNotNull(grid.GetItem(2, 3), "GetItem returns the cell");
-        Assert.ThrowsException<ArgumentOutOfRangeException>(() => grid.GetItem(3, 0));
-        Assert.ThrowsException<ArgumentOutOfRangeException>(() => grid.GetItem(0, 4));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => grid.GetItem(3, 0));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => grid.GetItem(0, 4));
 
         var table = peer.GetPattern(PatternInterface.Table) as ITableProvider;
         Assert.IsNotNull(table, "Table pattern");
@@ -217,7 +217,7 @@ public class DatgelAutomationPeerTests
 
         first.Select();
 
-        Assert.ThrowsException<InvalidOperationException>(() => second.AddToSelection());
+        Assert.ThrowsExactly<InvalidOperationException>(() => second.AddToSelection());
         Assert.IsTrue(first.IsSelected);
         Assert.IsFalse(second.IsSelected);
     }

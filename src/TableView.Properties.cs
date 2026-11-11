@@ -45,17 +45,17 @@ public partial class TableView
     /// <summary>
     /// Identifies the RowHeight dependency property.
     /// </summary>
-    public static readonly DependencyProperty RowHeightProperty = DependencyProperty.Register(nameof(RowHeight), typeof(double), typeof(TableView), new PropertyMetadata(double.NaN));
+    public static readonly DependencyProperty RowHeightProperty = DependencyProperty.Register(nameof(RowHeight), typeof(double), typeof(TableView), new PropertyMetadata(double.NaN, OnRowHeightsChanged));
 
     /// <summary>
     /// Identifies the RowMaxHeight dependency property.
     /// </summary>
-    public static readonly DependencyProperty RowMaxHeightProperty = DependencyProperty.Register(nameof(RowMaxHeight), typeof(double), typeof(TableView), new PropertyMetadata(double.PositiveInfinity));
+    public static readonly DependencyProperty RowMaxHeightProperty = DependencyProperty.Register(nameof(RowMaxHeight), typeof(double), typeof(TableView), new PropertyMetadata(double.PositiveInfinity, OnRowHeightsChanged));
 
     /// <summary>
     /// Identifies the RowMinHeight dependency property.
     /// </summary>
-    public static readonly DependencyProperty RowMinHeightProperty = DependencyProperty.Register(nameof(RowMinHeight), typeof(double), typeof(TableView), new PropertyMetadata(40d));
+    public static readonly DependencyProperty RowMinHeightProperty = DependencyProperty.Register(nameof(RowMinHeight), typeof(double), typeof(TableView), new PropertyMetadata(40d, OnRowHeightsChanged));
 
     /// <summary>
     /// Identifies the ShowExportOptions dependency property.
@@ -209,6 +209,16 @@ public partial class TableView
     public static readonly DependencyProperty UseRightClickForColumnFilterProperty = DependencyProperty.Register(nameof(UseRightClickForColumnFilter), typeof(bool), typeof(TableView), new PropertyMetadata(false));
 
     /// <summary>
+    /// Identifies the EnterKeyNavigation dependency property.
+    /// </summary>
+    public static readonly DependencyProperty EnterKeyNavigationProperty = DependencyProperty.Register(nameof(EnterKeyNavigation), typeof(TableViewEnterKeyNavigation), typeof(TableView), new PropertyMetadata(TableViewEnterKeyNavigation.Down));
+
+    /// <summary>
+    /// Identifies the ContinueEditingOnNavigation dependency property.
+    /// </summary>
+    public static readonly DependencyProperty ContinueEditingOnNavigationProperty = DependencyProperty.Register(nameof(ContinueEditingOnNavigation), typeof(bool), typeof(TableView), new PropertyMetadata(true));
+
+    /// <summary>
     /// Identifies the VerticalOffset dependency property.
     /// </summary>
     public static readonly DependencyProperty VerticalOffsetProperty = DependencyProperty.Register(nameof(VerticalOffset), typeof(double), typeof(TableView), new PropertyMetadata(0d));
@@ -262,6 +272,11 @@ public partial class TableView
     /// Identifies the ColumnResizeMode dependency property.
     /// </summary>
     public static readonly DependencyProperty ColumnResizeModeProperty = DependencyProperty.Register(nameof(ColumnResizeMode), typeof(TableViewColumnResizeMode), typeof(TableView), new PropertyMetadata(TableViewColumnResizeMode.Live));
+
+    /// <summary>
+    /// Identifies the ColumnResizeAreaWidth dependency property.
+    /// </summary>
+    public static readonly DependencyProperty ColumnResizeAreaWidthProperty = DependencyProperty.Register(nameof(ColumnResizeAreaWidth), typeof(double), typeof(TableView), new PropertyMetadata(TableViewColumnHeader.DefaultResizeAreaWidth));
 
     /// <summary>
     /// Identifies the FrozenColumnCount dependency property.
@@ -354,6 +369,27 @@ public partial class TableView
     {
         get => (bool)GetValue(UseRightClickForColumnFilterProperty);
         set => SetValue(UseRightClickForColumnFilterProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets where the Enter key moves the current cell. The default, <see cref="TableViewEnterKeyNavigation.Down"/>,
+    /// moves to the cell below; <see cref="TableViewEnterKeyNavigation.Right"/> moves to the next cell to the right.
+    /// </summary>
+    public TableViewEnterKeyNavigation EnterKeyNavigation
+    {
+        get => (TableViewEnterKeyNavigation)GetValue(EnterKeyNavigationProperty);
+        set => SetValue(EnterKeyNavigationProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether Tab or Enter pressed while editing a cell begins editing the
+    /// cell it moves to. The default is <see langword="true"/>. When <see langword="false"/>, the edit is
+    /// committed and the next cell is only made current and selected, as in a spreadsheet.
+    /// </summary>
+    public bool ContinueEditingOnNavigation
+    {
+        get => (bool)GetValue(ContinueEditingOnNavigationProperty);
+        set => SetValue(ContinueEditingOnNavigationProperty, value);
     }
 
     /// <summary>
@@ -851,6 +887,166 @@ public partial class TableView
     public double HorizontalOffset => (double)GetValue(HorizontalOffsetProperty);
 
     /// <summary>
+    /// Gets or sets whether cells and column headers scrolled out of the horizontal viewport are hidden from the
+    /// renderer (opacity 0, layout unchanged). On by default. It matters on Uno, whose Skia renderer otherwise
+    /// draws every realised cell of every column on every frame (Datgel DH-2215). See <c>HorizontalCulling</c>.
+    /// </summary>
+    public bool CullsOffscreenColumns
+    {
+        get => _cullsOffscreenColumns;
+        set
+        {
+            if (_cullsOffscreenColumns == value)
+                return;
+            _cullsOffscreenColumns = value;
+            RefreshCulling();
+        }
+    }
+
+    /// <summary>
+    /// Re-runs the off-screen cull (DH-2215): it is applied when the header row and each row are arranged, against the
+    /// table's width, which is 0 on the first pass and changes without re-arranging a row whose own size did not.
+    /// </summary>
+    internal void RefreshCulling()
+    {
+        _headerRow?.RealizeHeadersInView(); // Datgel DH-3839
+        _headerRow?.InvalidateArrange();
+        foreach (var row in _rows)
+        {
+            // Datgel DH-2718: a width change can bring columns into view that a virtualising row has no cell for yet.
+            row?.RealizeColumnsInView();
+            row?.RowPresenter?.InvalidateArrange();
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets whether a row creates cells only for the columns within <see cref="HorizontalCulling.Margin"/> of the
+    /// horizontal viewport (Datgel DH-2718). Off by default. A row otherwise creates a cell for EVERY visible column, and
+    /// creating them (a control per column, inserted into the row's panel) was most of what opening a 177-column table
+    /// still cost once off-screen cells deferred their element and template (DH-2231, DH-2695).
+    /// </summary>
+    /// <remarks>
+    /// <para>With it on, a row's <see cref="TableViewRowPresenter.Cells"/> holds only the realised cells, in column order,
+    /// each with its <see cref="TableViewCell.Index"/>; the columns between two realised cells are a left margin on the
+    /// second, so every realised cell sits exactly where it would without virtualisation. Cells are added as columns
+    /// scroll into view (and kept when they scroll away), and a cell asked for by slot (the current cell, an edit, a
+    /// selection by keyboard) is created on demand.</para>
+    /// <para>Always realised, wherever they are: frozen columns, auto-width columns (measured from their cells) and
+    /// columns with <see cref="TableViewColumn.AlwaysRealizeElement"/> — a wrapping column that decides the row's height
+    /// therefore still does, so a row's height does not change as it scrolls sideways.</para>
+    /// </remarks>
+    public bool VirtualizesColumns
+    {
+        get => _virtualizesColumns;
+        set
+        {
+            if (_virtualizesColumns == value)
+                return;
+            _virtualizesColumns = value;
+            foreach (var row in _rows)
+                row?.RebuildCells();
+        }
+    }
+
+    private bool _virtualizesColumns;
+
+    /// <summary>
+    /// The horizontal band, in the scrollable cells panel's coordinates, a virtualising row realises cells for
+    /// (Datgel DH-2718): the viewport plus <see cref="HorizontalCulling.Margin"/> either side. Before the table has a
+    /// width (its first layout) the window's width stands in for it, so a first open realises a screenful, not nothing.
+    /// </summary>
+    internal (double Left, double Width) ColumnRealizationBand()
+    {
+        var width = ActualWidth > 0 ? ActualWidth
+            : XamlRoot?.Size.Width is > 0 and var rootWidth ? rootWidth
+            : 1920;
+        return (HorizontalOffset - HorizontalCulling.Margin, width + 2 * HorizontalCulling.Margin);
+    }
+
+    private bool _cullsOffscreenColumns = true;
+
+    /// <summary>
+    /// Gets or sets whether a cell scrolled out of the horizontal viewport defers building its element
+    /// (<see cref="TableViewColumn.GenerateElement"/>) until it comes into view (Datgel DH-2231). On by default.
+    /// The cell itself is still created, so it keeps its place, width, index and slot: selection, editing,
+    /// navigation and paste are unaffected. A frozen column, an auto-width column (its width is measured from its
+    /// cells) and a column with <see cref="TableViewColumn.AlwaysRealizeElement"/> are never deferred. A realised
+    /// element is kept when it scrolls away again (<see cref="CullsOffscreenColumns"/> still hides it from the renderer).
+    /// </summary>
+    public bool DefersOffscreenCellElements
+    {
+        get => _defersOffscreenCellElements;
+        set
+        {
+            if (_defersOffscreenCellElements == value)
+                return;
+            _defersOffscreenCellElements = value;
+            RefreshCulling();
+        }
+    }
+
+    private bool _defersOffscreenCellElements = true;
+
+    /// <summary>
+    /// Gets or sets whether a column header outside the horizontal viewport defers its template until it comes into
+    /// view (Datgel DH-2252). On by default. The header itself is still created, with its column, width and place, so
+    /// column widths, the UI Automation header items and resizing a column in view are unaffected. A frozen column and
+    /// a column whose width is not absolute (auto is measured from its header, star from the table) are never deferred.
+    /// A realised header keeps its template when it scrolls away again.
+    /// </summary>
+    public bool DefersOffscreenColumnHeaders
+    {
+        get => _defersOffscreenColumnHeaders;
+        set
+        {
+            if (_defersOffscreenColumnHeaders == value)
+                return;
+            _defersOffscreenColumnHeaders = value;
+            RefreshCulling();
+        }
+    }
+
+    private bool _defersOffscreenColumnHeaders = true;
+
+    /// <summary>
+    /// Gets or sets whether only the column headers near the horizontal viewport are elements in the visual tree
+    /// (Datgel DH-3839). Off by default. Every visible column still has its <see cref="TableViewColumn.HeaderControl"/>,
+    /// with its width, sort and filter state, but a header beyond the band <see cref="VirtualizesColumns"/> uses (the
+    /// viewport plus <c>HorizontalCulling.Margin</c> either side) is not in the header row's panel until it scrolls into
+    /// that band; it is then inserted and kept. <see cref="TableViewColumnHeader.IsRealized"/> says which are in.
+    /// </summary>
+    /// <remarks>
+    /// <para>A deferred template (<see cref="DefersOffscreenColumnHeaders"/>) still left one element per column in the
+    /// tree. On Uno's Win32 head each element entering the tree gets a UI Automation provider and raises a bounding-box
+    /// event on every arrange, so a 178-column table paid for 178 header elements on its first layout while about a dozen
+    /// were on screen (measured in Datgel Hub, DH-3839).</para>
+    /// <para>Always realised, wherever they are: frozen columns and columns whose width is not absolute (auto is measured
+    /// from its header, star from the table). The columns between two realised headers are a left margin on the second,
+    /// so every realised header sits exactly where it would without virtualisation.</para>
+    /// </remarks>
+    public bool VirtualizesColumnHeaders
+    {
+        get => _virtualizesColumnHeaders;
+        set
+        {
+            if (_virtualizesColumnHeaders == value)
+                return;
+            _virtualizesColumnHeaders = value;
+            _headerRow?.RebuildHeaders();
+        }
+    }
+
+    private bool _virtualizesColumnHeaders;
+
+    /// <summary>
+    /// The header of <paramref name="column"/>, realised now if the table virtualises its headers and it is not yet
+    /// (Datgel DH-3839). For a cell peer asked for its header item: a cell may exist off screen (always-realised
+    /// columns, a cell created by slot) where its header was not realised. Null when there is no realised header.
+    /// </summary>
+    internal TableViewColumnHeader? RealizeColumnHeader(TableViewColumn column) =>
+        _headerRow?.RealizeHeader(column) ?? (column.HeaderControl is { IsRealized: true } header ? header : null);
+
+    /// <summary>
     /// Gets the actual width of the row header.
     /// </summary>
     public double RowHeaderActualWidth => (double)GetValue(RowHeaderActualWidthProperty);
@@ -926,6 +1122,18 @@ public partial class TableView
     {
         get => (TableViewColumnResizeMode)GetValue(ColumnResizeModeProperty);
         set => SetValue(ColumnResizeModeProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets how far, in device-independent pixels, the column-resize grip reaches into the header on EACH
+    /// side of a column boundary for a mouse or pen (default 4, so the grip spans 8 DIP centred on the boundary).
+    /// A touch contact always gets at least 8 DIP per side. The grip scales with the display like any other
+    /// layout size; values below 1 are treated as 1.
+    /// </summary>
+    public double ColumnResizeAreaWidth
+    {
+        get => (double)GetValue(ColumnResizeAreaWidthProperty);
+        set => SetValue(ColumnResizeAreaWidthProperty, value);
     }
 
     /// <summary>
@@ -1107,6 +1315,25 @@ public partial class TableView
         }
     }
 #endif
+
+    /// <summary>
+    /// Pushes a changed <see cref="RowHeight"/>, <see cref="RowMinHeight"/> or <see cref="RowMaxHeight"/> to every
+    /// realised row's cells (Datgel DH-2718). The cells used to carry three RelativeSource bindings each to these
+    /// properties; on a 177-column row those 531 bindings were ~16 % of opening a wide table.
+    /// </summary>
+    private static void OnRowHeightsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is TableView tableView)
+        {
+            foreach (var row in tableView._rows)
+            {
+                foreach (var cell in row.Cells)
+                {
+                    cell.ApplyRowHeights(tableView);
+                }
+            }
+        }
+    }
 
     /// <summary>
     /// Handles changes to the IsReadOnly property.
@@ -1308,10 +1535,12 @@ public partial class TableView
     {
         if (d is TableView { _headerRow: { } } tableView)
         {
+            tableView._headerRow.RealizeHeadersInView(); // Datgel DH-3839: the headers scrolled into view become elements
             tableView._headerRow.InvalidateArrange();
 
             foreach (var row in tableView._rows)
             {
+                row?.RealizeColumnsInView(); // Datgel DH-2718: the columns scrolled into view get their cells
                 row?.RowPresenter?.InvalidateArrange();
             }
         }
@@ -1341,6 +1570,7 @@ public partial class TableView
         if (d is TableView tableView)
         {
             tableView.SetHeadersVisibility();
+            tableView._headerRow?.SetCellsHorizontalOffset();
             tableView.UpdateHorizontalScrollBarMargin();
         }
     }

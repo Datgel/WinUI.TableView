@@ -13,6 +13,7 @@ using System.Linq;
 using Windows.Foundation;
 using Windows.Foundation.Collections;
 using WinUI.TableView.Extensions;
+using WinUI.TableView.Helpers;
 
 namespace WinUI.TableView;
 
@@ -100,6 +101,8 @@ public partial class TableViewHeaderRow : Control
         SetExportOptionsVisibility();
         SetCornerButtonState();
         SetHeadersVisibility();
+        SetCellsHorizontalOffset();
+        TableView.UpdateHorizontalScrollBarMargin();
         EnsureGridLines();
     }
 
@@ -108,11 +111,20 @@ public partial class TableViewHeaderRow : Control
     {
         finalSize = base.ArrangeOverride(finalSize);
 
+        // DH-2252: the frozen headers never scroll, so none of them stays deferred (a column frozen after its header
+        // was created moves here with no template).
+        HorizontalCulling.RealizeAll(_frozenHeadersPanel);
+
         if (_scrollableHeadersPanel is not null && _frozenHeadersPanel is not null && TableView is not null && _scrollableHeadersPanel.ActualWidth > 0)
         {
             var frozenOffset = _frozenHeadersPanel.ActualOffset.X + _frozenHeadersPanel.ActualWidth;
             var headersOffset = -TableView.HorizontalOffset + frozenOffset;
-            var xClip = (headersOffset * -1) + frozenOffset;
+            // This reduces to TableView.HorizontalOffset, which is read live from the scroll viewer,
+            // while ActualWidth is left over from the previous arrange. Narrowing a column while the
+            // view is scrolled right can therefore leave the offset past the panel's own extent, which
+            // would give the clip below a zero or negative width - not a valid rectangle, and it hides
+            // every header. Clamp it into the panel's extent so the clip is always well formed.
+            var xClip = Math.Clamp((headersOffset * -1) + frozenOffset, 0, _scrollableHeadersPanel.ActualWidth);
 
             _scrollableHeadersPanel.Arrange(new Rect(headersOffset, 0, _scrollableHeadersPanel.ActualWidth, _scrollableHeadersPanel.ActualHeight));
             _scrollableHeadersPanel.Clip = headersOffset >= frozenOffset ? null :
@@ -120,6 +132,10 @@ public partial class TableViewHeaderRow : Control
                 {
                     Rect = new Rect(xClip, 0, _scrollableHeadersPanel.ActualWidth - xClip, finalSize.Height)
                 };
+
+            // DH-2215: the same culling as the rows' cells (TableViewRowPresenter.ArrangeOverride), in the panel's
+            // own coordinates, where the viewport starts at HorizontalOffset.
+            HorizontalCulling.Apply(_scrollableHeadersPanel, TableView.HorizontalOffset, TableView.ActualWidth, TableView.CullsOffscreenColumns);
         }
 
         return finalSize;
@@ -156,6 +172,14 @@ public partial class TableViewHeaderRow : Control
 
     private void MoveHeaders(TableViewColumn column, int newIndex)
     {
+        if (TableView?.VirtualizesColumnHeaders is true)
+        {
+            // Datgel DH-3839: the panels hold only the realised headers, so a position in the column list is not a
+            // position in a panel. Put every realised header back by column order instead.
+            ResortRealizedHeaders();
+            return;
+        }
+
         if (Headers.FirstOrDefault(h => h.Column == column) is { } header)
         {
             RemoveHeader(header);
@@ -202,6 +226,16 @@ public partial class TableViewHeaderRow : Control
                 CalculateHeaderWidths();
             }
         }
+        else if (e.PropertyName is nameof(TableViewColumn.ActualWidth))
+        {
+            // Datgel DH-3839: a column that changed width moves every column after it, so the gaps in front of the
+            // realised headers move, and columns may enter the band. CalculateHeaderWidths does this once at its end.
+            if (!_calculatingHeaderWidths && TableView?.VirtualizesColumnHeaders is true)
+            {
+                RealizeHeadersInView();
+                UpdateHeaderGaps();
+            }
+        }
         else if (e.PropertyName is nameof(TableViewColumn.DesiredWidth))
         {
             // Coalesce multiple updates (see in-loop Measure() call in CalculateHeaderWidths) to avoid excessive header width calculations.
@@ -231,9 +265,18 @@ public partial class TableViewHeaderRow : Control
     /// </summary>
     private void RemoveHeaders(IEnumerable<TableViewColumn> columns)
     {
+        var virtualizes = TableView?.VirtualizesColumnHeaders is true;
+
         foreach (var column in columns)
         {
             var header = Headers.FirstOrDefault(x => x.Column == column);
+
+            // Datgel DH-3839: a header that is not realised is in no panel, but it is still the column's header.
+            if (header is null && virtualizes && column.HeaderControl is { Column: { } owner } unrealised && owner == column)
+            {
+                header = unrealised;
+            }
+
             if (header is not null)
             {
                 RemoveHeader(header);
@@ -244,6 +287,11 @@ public partial class TableViewHeaderRow : Control
                 column.HeaderControl = null;
             }
         }
+
+        if (virtualizes)
+        {
+            UpdateHeaderGaps();
+        }
     }
 
     /// <summary>
@@ -253,18 +301,38 @@ public partial class TableViewHeaderRow : Control
     {
         if (TableView is not null && _scrollableHeadersPanel is not null)
         {
+            // Datgel DH-3839: a virtualising header row inserts only the headers it must realise; the rest wait for
+            // RealizeHeadersInView.
+            var virtualizes = TableView.VirtualizesColumnHeaders;
+            var starts = virtualizes ? TableViewRow.ColumnStarts([.. TableView.Columns.VisibleColumns.Where(x => !x.IsFrozen)]) : null;
+            var band = virtualizes ? TableView.ColumnRealizationBand() : default;
+
             foreach (var column in columns)
             {
                 var header = new TableViewColumnHeader { DataContext = column, Column = column };
                 column.HeaderControl = header;
 
-                InsertHeader(header);
+                // DH-2252: nothing is arranged yet, so a header that may defer starts without its template; the first
+                // arrange with a known viewport (ArrangeOverride -> HorizontalCulling) gives the visible ones theirs.
+                if (header.ShouldDeferTemplate())
+                {
+                    header.DeferTemplate();
+                }
 
-                header.SetBinding(ContentControl.ContentProperty,
-                                  new Binding { Path = new PropertyPath(nameof(TableViewColumn.Header)) });
+                if (!virtualizes || MustRealizeHeader(column, starts!, band))
+                {
+                    InsertHeader(header);
+                }
+
+                header.SetBinding(ContentControl.ContentProperty, SharedResources.HeaderBinding);
             }
 
             CalculateHeaderWidths();
+
+            if (virtualizes)
+            {
+                UpdateHeaderGaps();
+            }
         }
     }
 
@@ -276,6 +344,13 @@ public partial class TableViewHeaderRow : Control
         if (TableView?.ActualWidth > 0)
         {
             _calculatingHeaderWidths = true;
+
+            // Datgel DH-3839: a column that just became auto-width is measured from its header below, so it must be in
+            // the tree first (an auto column is always realised).
+            if (TableView.VirtualizesColumnHeaders)
+            {
+                RealizeHeadersInView();
+            }
 
             var allColumns = TableView.Columns.VisibleColumns.ToList();
             var starColumns = allColumns.Where(x => x.Width.IsStar).ToList();
@@ -343,6 +418,13 @@ public partial class TableViewHeaderRow : Control
 
             _calculatingHeaderWidths = false;
 
+            // Datgel DH-3839: the widths are known now, so the band and the gaps are too.
+            if (TableView.VirtualizesColumnHeaders)
+            {
+                RealizeHeadersInView();
+                UpdateHeaderGaps();
+            }
+
             TableView.UpdateHorizontalScrollBarMargin();
         }
     }
@@ -357,6 +439,9 @@ public partial class TableViewHeaderRow : Control
 
         if (column.HeaderControl is { } header && autoWidthMode is not TableViewColumnAutoWidthMode.Cells)
         {
+            // DH-2252: a header's desired width is measured from its template.
+            header.EnsureTemplate();
+
             if (header.CachedDesiredWidth is null)
             {
                 header.Width = double.NaN;
@@ -473,6 +558,32 @@ public partial class TableViewHeaderRow : Control
     }
 
     /// <summary>
+    /// Sets the horizontal offset of the cells in the header row based on the TableView settings.
+    /// </summary>
+    internal void SetCellsHorizontalOffset()
+    {
+        // if there are no items, we want to reset the horizontal offset
+        // so that the header row corner can take up the desired width.
+        if (TableView?.CollectionView.Count == 0)
+        {
+            if (TableView is ListView { SelectionMode: ListViewSelectionMode.Multiple })
+            {
+                TableView.CellsHorizontalOffset = double.NaN;
+            }
+            else if (TableView.HeadersVisibility is TableViewHeadersVisibility.All)
+            {
+                var rowHeaderWidth = TableView.RowHeaderWidth is double.NaN ? 0 : TableView.RowHeaderWidth;
+                TableView.CellsHorizontalOffset = Math.Min(TableView.RowHeaderMaxWidth,
+                    Math.Max(TableView.RowHeaderMinWidth, rowHeaderWidth));
+            }
+            else
+            {
+                TableView.CellsHorizontalOffset = 0;
+            }
+        }
+    }
+
+    /// <summary>
     /// Handles the SelectAllButton clicked event.
     /// </summary>
     private void OnSelectAllButtonClicked(object sender, TappedRoutedEventArgs e)
@@ -526,7 +637,7 @@ public partial class TableViewHeaderRow : Control
 
 
                 _v_gridLine.Fill = TableView.HeaderGridLinesVisibility is TableViewGridLinesVisibility.All or TableViewGridLinesVisibility.Vertical
-                                   ? TableView.VerticalGridLinesStroke : new SolidColorBrush(Colors.Transparent);
+                                   ? TableView.VerticalGridLinesStroke : SharedResources.TransparentBrush;
                 _v_gridLine.Width = TableView.VerticalGridLinesStrokeThickness;
                 _v_gridLine.Visibility = vGridLinesVisibility && (areHeadersVisible || isMultiSelection || isDetailsToggleButtonVisible) ? Visibility.Visible : Visibility.Collapsed;
             }
@@ -663,6 +774,12 @@ public partial class TableViewHeaderRow : Control
     {
         if (TableView is null || header is not { Column: { } column }) return;
 
+        if (TableView.VirtualizesColumnHeaders)
+        {
+            InsertRealizedHeader(header, column);
+            return;
+        }
+
         var _frozenColumns = TableView.Columns.VisibleColumns.Where(x => x.IsFrozen).ToList();
         var _scrollableColumns = TableView.Columns.VisibleColumns.Where(x => !x.IsFrozen).ToList();
 
@@ -673,6 +790,7 @@ public partial class TableViewHeaderRow : Control
             index = Math.Max(index, 0); // handles -ve index;
 
             _frozenHeadersPanel.Children.Insert(index, header);
+            header.IsRealized = true;
         }
         else if (_scrollableHeadersPanel is not null)
         {
@@ -681,7 +799,202 @@ public partial class TableViewHeaderRow : Control
             index = Math.Max(index, 0); // handles -ve index;
 
             _scrollableHeadersPanel.Children.Insert(index, header);
+            header.IsRealized = true;
         }
+    }
+
+    /// <summary>
+    /// Inserts <paramref name="header"/> into its panel after every realised header whose column comes before
+    /// <paramref name="column"/> (Datgel DH-3839): a virtualising panel holds only some of the columns, so a column's
+    /// index in the column list is not its index in the panel.
+    /// </summary>
+    private void InsertRealizedHeader(TableViewColumnHeader header, TableViewColumn column)
+    {
+        var panel = column.IsFrozen ? _frozenHeadersPanel : _scrollableHeadersPanel;
+        if (TableView is null || panel is null || panel.Children.Contains(header))
+        {
+            return;
+        }
+
+        var visibleColumns = TableView.Columns.VisibleColumns;
+        var position = new Dictionary<TableViewColumn, int>(visibleColumns.Count);
+        for (var i = 0; i < visibleColumns.Count; i++)
+        {
+            position[visibleColumns[i]] = i;
+        }
+
+        var at = position.TryGetValue(column, out var p) ? p : int.MaxValue;
+        var index = 0;
+        foreach (var child in panel.Children)
+        {
+            if (child is TableViewColumnHeader { Column: { } other } && position.TryGetValue(other, out var o) && o < at)
+            {
+                index++;
+            }
+        }
+
+        if (column.IsFrozen)
+        {
+            header.ClearValue(MarginProperty); // the frozen panel has no gaps
+        }
+
+        panel.Children.Insert(index, header);
+        header.IsRealized = true;
+    }
+
+    /// <summary>
+    /// Whether a virtualising header row must realise the header of <paramref name="column"/> (Datgel DH-3839): a
+    /// frozen column or one whose width is not absolute always, and any column within <paramref name="band"/> - the
+    /// same band a virtualising row realises cells for (<see cref="TableView.ColumnRealizationBand"/>).
+    /// </summary>
+    private static bool MustRealizeHeader(TableViewColumn column, Dictionary<TableViewColumn, double> starts, (double Left, double Width) band)
+    {
+        // AlwaysRealizeElement: a row always has that column's cell, and a cell's peer names its header item, so the
+        // header must exist wherever the cell does (the rows' MustRealize rule).
+        if (column.IsFrozen || column.AlwaysRealizeElement || !column.Width.IsAbsolute || !starts.TryGetValue(column, out var start))
+            return true;
+
+        var width = TableViewRow.LayoutWidth(column);
+        return double.IsNaN(width) || HorizontalCulling.IsInView(start, width, band.Left, band.Width, margin: 0);
+    }
+
+    /// <summary>
+    /// Realises the header of <paramref name="column"/> now, wherever it is, and returns it (Datgel DH-3839): for a
+    /// cell created on demand off screen (<c>TableViewRow.RealizeCell</c>) whose peer is asked for its header item.
+    /// Null when the column has no header (hidden) or the row is not templated.
+    /// </summary>
+    internal TableViewColumnHeader? RealizeHeader(TableViewColumn column)
+    {
+        if (column.HeaderControl is not { } header || header.Column != column)
+            return null;
+
+        if (!header.IsRealized && TableView?.VirtualizesColumnHeaders is true)
+        {
+            InsertRealizedHeader(header, column);
+            UpdateHeaderGaps();
+        }
+
+        return header.IsRealized ? header : null;
+    }
+
+    /// <summary>
+    /// Inserts the headers of the columns that have come within the realisation band (Datgel DH-3839). Called when the
+    /// table scrolls sideways or changes width, and when column widths change. A realised header is kept when it
+    /// scrolls away again. Returns how many headers were inserted.
+    /// </summary>
+    internal int RealizeHeadersInView()
+    {
+        if (TableView is not { VirtualizesColumnHeaders: true } tableView || _scrollableHeadersPanel is null)
+            return 0;
+
+        var visibleColumns = tableView.Columns.VisibleColumns;
+        var starts = TableViewRow.ColumnStarts([.. visibleColumns.Where(x => !x.IsFrozen)]);
+        var band = tableView.ColumnRealizationBand();
+
+        var inserted = 0;
+        foreach (var column in visibleColumns)
+        {
+            if (column.HeaderControl is { IsRealized: false } header && header.Column == column && MustRealizeHeader(column, starts, band))
+            {
+                InsertRealizedHeader(header, column);
+                inserted++;
+            }
+        }
+
+        if (inserted > 0)
+            UpdateHeaderGaps();
+
+        return inserted;
+    }
+
+    /// <summary>
+    /// Gives every realised scrollable header a left margin equal to the width of the unrealised columns in front of
+    /// it, and the panel the width of all its columns, so each sits exactly where it would if every header were
+    /// realised (Datgel DH-3839; the rows' <c>TableViewRowPresenter.UpdateColumnGaps</c>).
+    /// </summary>
+    internal void UpdateHeaderGaps()
+    {
+        if (TableView is not { VirtualizesColumnHeaders: true } tableView || _scrollableHeadersPanel is null)
+            return;
+
+        var starts = new Dictionary<TableViewColumn, double>();
+        var total = 0d;
+        foreach (var column in tableView.Columns.VisibleColumns)
+        {
+            if (column.IsFrozen)
+                continue;
+            starts[column] = total;
+            var width = TableViewRow.LayoutWidth(column);
+            total += double.IsNaN(width) ? 0 : width;
+        }
+
+        var end = 0d;
+        foreach (var child in _scrollableHeadersPanel.Children)
+        {
+            if (child is not TableViewColumnHeader { Column: { } column } header || !starts.TryGetValue(column, out var start))
+                continue;
+
+            var left = Math.Max(0, start - end);
+            if (header.Margin.Left != left || header.Margin.Right != 0 || header.Margin.Top != 0 || header.Margin.Bottom != 0)
+                header.Margin = new Thickness(left, 0, 0, 0);
+            var width = TableViewRow.LayoutWidth(column);
+            end = start + (double.IsNaN(width) ? header.ActualWidth : width);
+        }
+
+        if (_scrollableHeadersPanel.MinWidth != total)
+            _scrollableHeadersPanel.MinWidth = total;
+    }
+
+    /// <summary>
+    /// Takes every realised header out of its panel and puts back, in column order, those that were realised and those
+    /// that must be (Datgel DH-3839) - after a column move, when the panels' order no longer matches the columns'.
+    /// </summary>
+    private void ResortRealizedHeaders()
+    {
+        if (TableView is null)
+            return;
+
+        var realised = Headers.ToList();
+        _frozenHeadersPanel?.Children.Clear();
+        _scrollableHeadersPanel?.Children.Clear();
+        foreach (var header in realised)
+            header.IsRealized = false;
+
+        var visibleColumns = TableView.Columns.VisibleColumns;
+        var starts = TableViewRow.ColumnStarts([.. visibleColumns.Where(x => !x.IsFrozen)]);
+        var band = TableView.ColumnRealizationBand();
+        foreach (var column in visibleColumns)
+        {
+            if (column.HeaderControl is { } header && header.Column == column
+                && (realised.Contains(header) || MustRealizeHeader(column, starts, band)))
+            {
+                InsertRealizedHeader(header, column);
+            }
+        }
+
+        UpdateHeaderGaps();
+    }
+
+    /// <summary>
+    /// Throws away and recreates every header, for a change of <see cref="TableView.VirtualizesColumnHeaders"/>
+    /// (Datgel DH-3839).
+    /// </summary>
+    internal void RebuildHeaders()
+    {
+        if (TableView?.Columns is not { } columns)
+            return;
+
+        ClearHeaders();
+        foreach (var column in columns)
+        {
+            if (column.HeaderControl is { } header && header.Column == column)
+                column.HeaderControl = null;
+        }
+
+        if (!TableView.VirtualizesColumnHeaders)
+            _scrollableHeadersPanel?.ClearValue(MinWidthProperty);
+
+        AddHeaders(columns.VisibleColumns);
     }
 
     /// <summary>
@@ -703,6 +1016,8 @@ public partial class TableViewHeaderRow : Control
         {
             _scrollableHeadersPanel.Children.Remove(header);
         }
+
+        header.IsRealized = false;
     }
 
     /// <summary>
@@ -716,6 +1031,8 @@ public partial class TableViewHeaderRow : Control
             {
                 header.Column.HeaderControl = null;
             }
+
+            header.IsRealized = false;
         }
 
         _frozenHeadersPanel?.Children.Clear();

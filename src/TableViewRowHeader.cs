@@ -132,9 +132,7 @@ public partial class TableViewRowHeader : ContentControl
     /// </summary>
     public TableViewRow? TableViewRow { get; internal set; }
 
-    /// <inheritdoc/>
-    protected override AutomationPeer OnCreateAutomationPeer()
-    {
-        return new AutomationPeers.TableViewRowHeaderAutomationPeer(this);
-    }
+    // Datgel fork (DH-1879): v1.5.0 creates AutomationPeers.TableViewRowHeaderAutomationPeer here. This
+    // fork does not (as in 1.4.1.3), so the automation tree stays the one DH-1445/DH-1450 measured. The
+    // v1.5.0 class is still compiled. Adopting it is DH-1880.
 }

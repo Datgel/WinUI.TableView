@@ -50,6 +50,8 @@ public partial class TableView : ListView
     private TableViewCellSlotRange? _lastDragSelectionCellRange;
     private ItemIndexRange? _lastDragSelectionRowRange;
     private bool _cellStateDispatchPending;
+    private bool _alternateRowColorsPending;
+    private (TableViewCellSlot Slot, TaskCompletionSource<bool> Completion)? _pendingEdit;
     private readonly HashSet<int> _pendingCellStateRows = [];
     private TableViewColumn? _resizingColumn;
     private double _resizingOriginalWidth;
@@ -81,9 +83,15 @@ public partial class TableView : ListView
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
         SelectionChanged += TableView_SelectionChanged;
+        Items.VectorChanged += OnItemsVectorChanged;
+        SizeChanged += (_, e) =>
+        {
+            if (e.NewSize.Width != e.PreviousSize.Width)
+                RefreshCulling();
+        };
         _collectionView.ItemPropertyChanged += OnItemPropertyChanged;
-#if WINDOWS
         _collectionView.VectorChanged += OnCollectionViewVectorChanged;
+#if WINDOWS
         _collectionView.PropertyChanging += OnCollectionViewPropertyChanging;
         _collectionView.PropertyChanged += OnCollectionViewPropertyChanged;
         ChoosingGroupHeaderContainer += OnChoosingGroupHeaderContainer;
@@ -128,24 +136,6 @@ public partial class TableView : ListView
         }
     }
 
-    /// <summary>
-    /// Refreshes every currently realized row's group indent on a Reset - covers a regroup/collapse/expand
-    /// toggle, which changes GroupDescriptions.Count or which rows are visible without necessarily going
-    /// through PrepareContainerForItemOverride for rows that were already realized. Also re-targets
-    /// <see cref="CurrentCellSlot"/> at the same underlying item - toggling any group reshuffles every
-    /// index after it, so the row a previously-set current cell points at can silently become a different
-    /// item once other groups expand or collapse around it.
-    /// </summary>
-    private void OnCollectionViewVectorChanged(IObservableVector<object> sender, IVectorChangedEventArgs args)
-    {
-        if (args.CollectionChange != CollectionChange.Reset) return;
-
-        foreach (var row in _rows)
-        {
-            row.RowPresenter?.SetGroupIndent();
-        }
-    }
-
     private void OnChoosingGroupHeaderContainer(ListViewBase sender, ChoosingGroupHeaderContainerEventArgs args)
     {
         if (args.GroupHeaderContainer is not TableViewGroupHeaderRow)
@@ -158,6 +148,40 @@ public partial class TableView : ListView
 #else
     }
 #endif
+
+    /// <summary>
+    /// Handles the VectorChanged event of the items collection. Inserting or removing an item shifts the index of every
+    /// row after it, which flips their alternate colors without their containers being prepared again.
+    /// </summary>
+    private void OnItemsVectorChanged(IObservableVector<object> sender, IVectorChangedEventArgs args)
+    {
+        if (args.CollectionChange is CollectionChange.ItemInserted or CollectionChange.ItemRemoved &&
+            (AlternateRowBackground is not null || AlternateRowForeground is not null))
+        {
+            EnsureAlternateRowColors();
+        }
+    }
+
+    /// <summary>
+    /// Handles the VectorChanged event of the CollectionView. When the collection is reset, it updates the group indent for each row.
+    /// </summary>
+    private void OnCollectionViewVectorChanged(IObservableVector<object> sender, IVectorChangedEventArgs args)
+    {
+        if (_collectionView.Count == 0)
+        {
+            _headerRow?.SetCellsHorizontalOffset();
+            UpdateHorizontalScrollBarMargin();
+        }
+#if WINDOWS
+        if (args.CollectionChange == CollectionChange.Reset)
+        {
+            foreach (var row in _rows)
+            {
+                row.RowPresenter?.SetGroupIndent();
+            }
+        }
+#endif
+    }
 
     /// <summary>
     /// Handles the SelectionChanged event of the TableView control.
@@ -244,6 +268,10 @@ public partial class TableView : ListView
                 }
 
                 row.TableView = this;
+                // A recycled row has no TableView while its content changes, so that pass can't restyle it.
+                row.EnsureAlternateColors();
+                // Datgel DH-2718: a row re-prepared after it was cleared missed every sideways scroll in between.
+                row.RealizeColumnsInView();
                 row.EnsureCellsStyle(default, item);
 
                 _pendingCellStateRows.Add(row.Index);
@@ -282,8 +310,8 @@ public partial class TableView : ListView
         var row = new TableViewRow { TableView = this };
 
         // Set bindings for FontFamily and FontSize to propagate from TableView to TableViewRow
-        row.SetBinding(FontFamilyProperty, new Binding { Path = new("TableView.FontFamily"), RelativeSource = new() { Mode = RelativeSourceMode.Self } });
-        row.SetBinding(FontSizeProperty, new Binding { Path = new("TableView.FontSize"), RelativeSource = new() { Mode = RelativeSourceMode.Self } });
+        row.SetBinding(FontFamilyProperty, SharedResources.FontFamilyBinding);
+        row.SetBinding(FontSizeProperty, SharedResources.FontSizeBinding);
 
         _rows.Add(row);
         return row;
@@ -946,56 +974,13 @@ public partial class TableView : ListView
         // Handle navigation keys
         else if (e.Key is VirtualKey.Tab or VirtualKey.Enter)
         {
-            var isEditing = IsEditing;
-
-            var newSlot = CurrentCellSlot ?? new();
-
-            do
-            {
-                newSlot = GetNextSlot(newSlot, shiftKey, e.Key is VirtualKey.Enter);
-
-            } while (isEditing && Columns[newSlot.Column].IsReadOnly);
-
-            if (isEditing && currentCell is not null)
-            {
-                if (!EndCellEditing(TableViewEditAction.Commit, currentCell)) return;
-
-                if (CurrentCellSlot == newSlot || GetCellFromSlot(newSlot) is not { } nextCell || !nextCell.BeginCellEditing(e))
-                {
-                    SetIsEditing(false);
-                }
-            }
-
-            MakeSelection(newSlot, false);
-
-            e.Handled = true;
+            // A cancelled commit leaves the key unhandled, as before the move was factored out.
+            e.Handled = HandleTabOrEnter(e.Key, shiftKey, currentCell, e);
         }
         else if ((e.Key is VirtualKey.Left or VirtualKey.Right or VirtualKey.Up or VirtualKey.Down)
                  && !IsEditing)
         {
-            var row = (LastSelectionUnit is TableViewSelectionUnit.Row ? CurrentRowIndex : CurrentCellSlot?.Row) ?? -1;
-            var column = CurrentCellSlot?.Column ?? -1;
-
-            if (row == -1 && column == -1)
-            {
-                row = column = 0;
-            }
-            else if (e.Key is VirtualKey.Left or VirtualKey.Right)
-            {
-                column = e.Key is VirtualKey.Left ? ctrlKey ? 0 : column - 1 : ctrlKey ? Columns.VisibleColumns.Count - 1 : column + 1;
-                if (column >= Columns.VisibleColumns.Count)
-                {
-                    column = 0;
-                    row++;
-                }
-            }
-            else
-            {
-                row = e.Key == VirtualKey.Up ? ctrlKey ? 0 : row - 1 : ctrlKey ? Items.Count - 1 : row + 1;
-            }
-
-            var newSlot = new TableViewCellSlot(row, column);
-            MakeSelection(newSlot, shiftKey);
+            MakeSelection(GetArrowSlot(e.Key, ctrlKey), shiftKey);
             e.Handled = true;
         }
         else if (e.Key is VirtualKey.Home or VirtualKey.End)
@@ -1032,6 +1017,184 @@ public partial class TableView : ListView
         var headerHeight = HeaderRowHeight is not double.NaN ? HeaderRowHeight : HeaderRowMinHeight;
         var availableHeight = ActualHeight - headerHeight;
         return (int)Math.Floor(availableHeight / rowHeight);
+    }
+
+    /// <summary>
+    /// Moves the current cell as Tab or Enter does. While editing, the edit is committed first; the cell
+    /// moved to is then edited too unless <see cref="ContinueEditingOnNavigation"/> is <see langword="false"/>.
+    /// </summary>
+    /// <returns><see langword="false"/> if committing the edit was cancelled, so nothing moved.</returns>
+    internal bool HandleTabOrEnter(VirtualKey key, bool shiftKey, TableViewCell? currentCell, RoutedEventArgs editingArgs)
+    {
+        var isEditing = IsEditing;
+
+        var newSlot = CurrentCellSlot ?? new();
+
+        do
+        {
+            newSlot = GetNextSlot(newSlot, shiftKey, key is VirtualKey.Enter && EnterKeyNavigation is TableViewEnterKeyNavigation.Down);
+
+        } while (isEditing && Columns[newSlot.Column].IsReadOnly);
+
+        if (isEditing && currentCell is not null)
+        {
+            if (!EndCellEditing(TableViewEditAction.Commit, currentCell)) return false;
+
+            if (!ContinueEditingOnNavigation || CurrentCellSlot == newSlot || GetCellFromSlot(newSlot) is not { } nextCell || !nextCell.BeginCellEditing(editingArgs))
+            {
+                SetIsEditing(false);
+            }
+        }
+
+        MakeSelection(newSlot, false);
+        return true;
+    }
+
+    /// <summary>
+    /// Commits the edit in progress, if any, and ends the edit session, leaving the edited cell current.
+    /// </summary>
+    /// <remarks>
+    /// This is what Tab or Enter do to the cell being left, without moving. <see cref="CellEditEnding"/> is
+    /// raised, and a handler that cancels it keeps the edit open.
+    /// </remarks>
+    /// <returns><see langword="true"/> if no edit is in progress any more; <see langword="false"/> if the
+    /// commit was cancelled.</returns>
+    public bool CommitEdit()
+    {
+        if (!IsEditing)
+        {
+            return true;
+        }
+
+        if (CurrentCellSlot is { } slot && GetCellFromSlot(slot) is { } cell)
+        {
+            // Move focus to the cell BEFORE the editing element is torn down, as the Escape path does.
+            cell.Focus(FocusState.Programmatic);
+
+            if (!EndCellEditing(TableViewEditAction.Commit, cell))
+            {
+                return false;
+            }
+        }
+
+        SetIsEditing(false);
+        return true;
+    }
+
+    /// <summary>
+    /// Moves the current cell as the given navigation key would, when no edit is in progress.
+    /// </summary>
+    /// <remarks>
+    /// Supports the arrow keys, Tab and Enter (honouring <see cref="EnterKeyNavigation"/>). A caller that
+    /// handles a key inside a cell editor - for example an arrow key that should commit the edit and move,
+    /// as in a spreadsheet entry mode - calls <see cref="CommitEdit"/> and then this.
+    /// </remarks>
+    /// <returns><see langword="true"/> if the key was a supported navigation key and no edit is in progress.</returns>
+    public bool NavigateFromCurrentCell(VirtualKey key, bool shiftKey = false, bool ctrlKey = false)
+    {
+        if (IsEditing)
+        {
+            return false;
+        }
+
+        if (key is VirtualKey.Left or VirtualKey.Right or VirtualKey.Up or VirtualKey.Down)
+        {
+            MakeSelection(GetArrowSlot(key, ctrlKey), shiftKey);
+            return true;
+        }
+
+        if (key is VirtualKey.Tab or VirtualKey.Enter)
+        {
+            MakeSelection(GetNextSlot(CurrentCellSlot ?? new(), shiftKey, key is VirtualKey.Enter && EnterKeyNavigation is TableViewEnterKeyNavigation.Down), false);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Makes the cell at <paramref name="slot"/> the current cell and begins editing it, as pressing F2 on
+    /// that cell does.
+    /// </summary>
+    /// <remarks>
+    /// <para>This is for a cell that exposes an affordance of its own while it is not being edited - a
+    /// drop-down arrow, a picker button - and needs a single click on that affordance to open the editor.
+    /// The control starts an edit only from a double tap and from F2, and a single click is not a gesture it
+    /// can infer.</para>
+    /// <para>The sequence matches the existing gestures:</para>
+    /// <list type="number">
+    /// <item>If another cell is being edited, that edit is committed first, as tapping or tabbing to a
+    /// different cell does. If committing is cancelled, no edit begins.</item>
+    /// <item>The cell becomes the <see cref="CurrentCellSlot"/> and is selected, as keyboard navigation to
+    /// it does, and is scrolled into view and focused.</item>
+    /// <item>The edit then begins. <see cref="BeginningEdit"/> is raised, and a handler that cancels it is
+    /// honoured.</item>
+    /// </list>
+    /// <para>No edit begins for a read-only table, column or cell, for a column that draws itself through
+    /// <see cref="TableViewColumn.UseSingleElement"/> (a double tap does not begin one either), or when the
+    /// cell is already being edited.</para>
+    /// </remarks>
+    /// <param name="slot">The cell to edit.</param>
+    /// <returns>A task whose result is <see langword="true"/> if the cell entered edit mode; otherwise
+    /// <see langword="false"/>.</returns>
+    public async Task<bool> BeginEditAsync(TableViewCellSlot slot)
+    {
+        if (IsReadOnly || !slot.IsValid(this))
+        {
+            return false;
+        }
+
+        if (IsEditing)
+        {
+            if (CurrentCellSlot == slot)
+            {
+                return false;
+            }
+
+            if (CurrentCellSlot is { } currentSlot
+                && GetCellFromSlot(currentSlot) is { } currentCell
+                && !EndCellEditing(TableViewEditAction.Commit, currentCell))
+            {
+                return false;
+            }
+
+            SetIsEditing(false);
+        }
+
+        // A later request supersedes an earlier one that has not started yet.
+        _pendingEdit?.Completion.TrySetResult(false);
+        _pendingEdit = null;
+
+        if (CurrentCellSlot == slot)
+        {
+            // Already current, so OnCurrentCellChanged will not run. A realized cell is edited directly,
+            // as F2 does, so the call completes synchronously; only a cell scrolled out of view waits.
+            return TryBeginEdit(GetCellFromSlot(slot) ?? await ScrollCellIntoView(slot));
+        }
+
+        var pending = new TaskCompletionSource<bool>();
+        _pendingEdit = (slot, pending);
+
+        MakeSelection(slot, false);
+
+        if (CurrentCellSlot != slot)
+        {
+            // Selection declined to make the cell current, so OnCurrentCellChanged will not start the edit.
+            _pendingEdit = null;
+            return false;
+        }
+
+        return await pending.Task;
+    }
+
+    /// <summary>
+    /// Begins editing <paramref name="cell"/> if the same conditions a double tap applies allow it.
+    /// </summary>
+    private bool TryBeginEdit(TableViewCell? cell)
+    {
+        return cell is { IsReadOnly: false, Column.UseSingleElement: false }
+            && !IsEditing
+            && cell.BeginCellEditing(new RoutedEventArgs());
     }
 
     /// <summary>
@@ -1119,7 +1282,7 @@ public partial class TableView : ListView
 #if WINDOWS
     /// <summary>
     /// Applies <see cref="AreStickyGroupHeadersEnabled"/> to the underlying <see cref="ItemsStackPanel"/>, if the
-    /// current <see cref="ItemsPanelRoot"/> is one.
+    /// current <see cref="ItemsControl.ItemsPanelRoot"/> is one.
     /// </summary>
     private void ApplyStickyGroupHeadersSetting()
     {
@@ -1192,6 +1355,10 @@ public partial class TableView : ListView
     /// </summary>
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
+        // WinUI can raise a stale Unloaded after Loaded while the control is still in the live tree
+        // (e.g. content of a ContentDialog, microsoft-ui-xaml#8342); treat it as a no-op.
+        if (IsLoaded) return;
+
         EndDragSelection();
         StopAutoScroll();
 
@@ -1201,6 +1368,19 @@ public partial class TableView : ListView
         }
 
         SuspendItemsSource();
+    }
+
+    /// <summary>
+    /// Stops following the items source WITHOUT changing what is shown: the realised rows stay as they are, and later
+    /// changes to the source (or to its items) are ignored. For a table about to be discarded (Datgel DH-2215): letting
+    /// go through <c>ItemsSource = null</c> resets the list and tears every realised row down at once, and while the
+    /// table is still bound a reload of the source does the same. One way: a table detached like this is not meant to be
+    /// shown again (its live-shaping subscription is not restored).
+    /// </summary>
+    public void DetachItemsSource()
+    {
+        _collectionView.ItemPropertyChanged -= OnItemPropertyChanged;
+        _collectionView.StopTracking();
     }
 
     /// <summary>
@@ -1254,6 +1434,35 @@ public partial class TableView : ListView
             var xOffset = HorizontalOffset + (mouseWheelDelta / 4.0);
             SetValue(HorizontalOffsetProperty, Math.Clamp(xOffset, 0, _scrollViewer.ScrollableWidth));
         }
+    }
+
+    /// <summary>
+    /// Gets the slot an arrow key moves the current cell to.
+    /// </summary>
+    private TableViewCellSlot GetArrowSlot(VirtualKey key, bool ctrlKey)
+    {
+        var row = (LastSelectionUnit is TableViewSelectionUnit.Row ? CurrentRowIndex : CurrentCellSlot?.Row) ?? -1;
+        var column = CurrentCellSlot?.Column ?? -1;
+
+        if (row == -1 && column == -1)
+        {
+            row = column = 0;
+        }
+        else if (key is VirtualKey.Left or VirtualKey.Right)
+        {
+            column = key is VirtualKey.Left ? ctrlKey ? 0 : column - 1 : ctrlKey ? Columns.VisibleColumns.Count - 1 : column + 1;
+            if (column >= Columns.VisibleColumns.Count)
+            {
+                column = 0;
+                row++;
+            }
+        }
+        else
+        {
+            row = key == VirtualKey.Up ? ctrlKey ? 0 : row - 1 : ctrlKey ? Items.Count - 1 : row + 1;
+        }
+
+        return new TableViewCellSlot(row, column);
     }
 
     /// <summary>
@@ -2048,6 +2257,13 @@ public partial class TableView : ListView
             return;
         }
 
+        // Datgel DH-2751: read the current cell BEFORE deselecting. DeselectAllCells sets CurrentCellSlot
+        // to null, so the "SelectionStartCellSlot ??= CurrentCellSlot" fallback below always read null.
+        // A click ends in EndDragSelection, which clears SelectionStartCellSlot, so Shift+arrow or
+        // Shift+click after a click anchored at the NEW slot and selected one cell instead of extending
+        // the block from the clicked cell.
+        var currentBeforeDeselect = CurrentCellSlot;
+
         if (!ctrlKey || !(SelectionMode is ListViewSelectionMode.Multiple or ListViewSelectionMode.Extended))
         {
             if (SelectionUnit is TableViewSelectionUnit.CellWithRow)
@@ -2071,7 +2287,7 @@ public partial class TableView : ListView
             SelectedCellRanges.Remove(selectionRange!);
         }
 
-        SelectionStartCellSlot ??= CurrentCellSlot;
+        SelectionStartCellSlot ??= currentBeforeDeselect;
         SelectionStartCellSlot ??= slot;
 
         if (shiftKey && SelectionMode is ListViewSelectionMode.Multiple or ListViewSelectionMode.Extended)
@@ -2181,6 +2397,15 @@ public partial class TableView : ListView
             var cell = await ScrollCellIntoView(newSlot.Value);
             cell?.ApplyCurrentCellState();
             cell?.Focus(FocusState.Programmatic);
+
+            // A BeginEditAsync call that moved the current cell starts its edit here, once the cell has
+            // been scrolled into view and focused, so that the editing element is the last thing to take
+            // focus rather than racing the Focus call above.
+            if (_pendingEdit is { } pending && pending.Slot == newSlot.Value)
+            {
+                _pendingEdit = null;
+                pending.Completion.TrySetResult(CurrentCellSlot == newSlot && TryBeginEdit(cell));
+            }
         }
     }
 
@@ -2589,12 +2814,12 @@ public partial class TableView : ListView
         if ((cellLeft >= viewportLeft && cellRight <= viewportRight) ||
             xOffset == HorizontalOffset)
         {
-            return row.Cells.ElementAt(slot.Column);
+            return row.GetCell(slot.Column)!;
         }
 
         SetValue(HorizontalOffsetProperty, xOffset);
 
-        return row?.Cells.ElementAt(slot.Column)!;
+        return row?.GetCell(slot.Column)!;
     }
 
     /// <summary>
@@ -2658,7 +2883,7 @@ public partial class TableView : ListView
     /// </summary>
     internal TableViewCell? GetCellFromSlot(TableViewCellSlot slot)
     {
-        return slot.IsValid(this) && ContainerFromIndex(slot.Row) is TableViewRow row ? row.Cells[slot.Column] : default;
+        return slot.IsValid(this) && ContainerFromIndex(slot.Row) is TableViewRow row ? row.GetCell(slot.Column) : default;
     }
 
     /// <summary>
@@ -2772,8 +2997,9 @@ public partial class TableView : ListView
         _shouldThrowBaseProeprtyChangedException = false;
         base.SelectionMode = SelectionUnit is TableViewSelectionUnit.Cell ? ListViewSelectionMode.None : SelectionMode;
 
-        UpdateHorizontalScrollBarMargin();
         _headerRow?.SetHeadersVisibility();
+        _headerRow?.SetCellsHorizontalOffset();
+        UpdateHorizontalScrollBarMargin();
 
         foreach (var row in _rows)
         {
@@ -2810,8 +3036,13 @@ public partial class TableView : ListView
     /// </summary>
     internal void EnsureAlternateRowColors()
     {
+        if (_alternateRowColorsPending) return;
+
+        _alternateRowColorsPending = true;
         DispatcherQueue.TryEnqueue(() =>
         {
+            _alternateRowColorsPending = false;
+
             foreach (var row in _rows)
             {
                 row.EnsureAlternateColors();
@@ -2999,7 +3230,7 @@ public partial class TableView : ListView
         if (_scrollViewer is null) return;
 
         var frozenColumns = Columns.VisibleColumns.Where(c => c.IsFrozen);
-        var offset = CellsHorizontalOffset + frozenColumns.Sum(c => c.ActualWidth);
+        var offset = (CellsHorizontalOffset is double.NaN ? 0 : CellsHorizontalOffset) + frozenColumns.Sum(c => c.ActualWidth);
         AttachedPropertiesHelper.SetFrozenColumnScrollBarSpace(_scrollViewer, offset);
     }
 }

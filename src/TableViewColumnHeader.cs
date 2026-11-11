@@ -10,9 +10,11 @@ using Microsoft.UI.Xaml.Shapes;
 using Windows.Foundation;
 using Windows.System;
 using Windows.UI.Core;
+using WinUI.TableView.Automation;
 using WinUI.TableView.Collections;
 using WinUI.TableView.Controls;
 using WinUI.TableView.Extensions;
+using WinUI.TableView.Helpers;
 using SD = WinUI.TableView.SortDirection;
 
 namespace WinUI.TableView;
@@ -92,7 +94,7 @@ public partial class TableViewColumnHeader : ContentControl
         // Shows the button's flyout if options button is available and filtering is enabled
         if (_optionsButton is not null && CanFilter)
         {
-            _optionsButton.Flyout?.ShowAt(_optionsButton);
+            ShowOptionsFlyout();
             e.Handled = true;
         }
     }
@@ -156,7 +158,7 @@ public partial class TableViewColumnHeader : ContentControl
     /// Gets a value indicating whether this grouped column currently orders its groups by item count
     /// rather than by key.
     /// </summary>
-    private bool IsGroupSortedByCount => 
+    private bool IsGroupSortedByCount =>
         _tableView?.GroupDescriptions.OfType<ColumnGroupDescription>()
                                      .FirstOrDefault(x => x.Column == Column) is { SortMode: GroupSortMode.Count };
 
@@ -327,12 +329,12 @@ public partial class TableViewColumnHeader : ContentControl
 
     /// <summary>
     /// Computes the next sort direction for a tap/invoke on this header. A grouped column with no
-    /// independent <see cref="ColumnSortDescription"/> of its own (<see cref="HasGroupSortCompanion"/>)
+    /// independent <see cref="ColumnSortDescription"/> of its own (HasGroupSortCompanion)
     /// cycles between just <see cref="SD.Ascending"/> and <see cref="SD.Descending"/> - its order is owned
     /// entirely by its group and always needs a direction, so it never lands on the cleared/unsorted state
     /// a three-state cycle's third click does. A grouped column that still has a leftover independent sort
     /// from before it was grouped keeps three-state cycling until that description is cleared (see
-    /// <see cref="HandOffToGroupDescription"/>), at which point it falls into the two-state case above.
+    /// HandOffToGroupDescription), at which point it falls into the two-state case above.
     /// </summary>
     private SD? GetNextSortDirection()
     {
@@ -357,6 +359,7 @@ public partial class TableViewColumnHeader : ContentControl
         base.OnApplyTemplate();
 
         _optionsButton?.Tapped -= OnOptionsButtonTaped;
+        _optionsButton?.Click -= OnOptionsButtonClick;
 
         FilterItemsControl?.FilterItems = null;
         FilterItemsControl?.TableView = null;
@@ -365,25 +368,128 @@ public partial class TableViewColumnHeader : ContentControl
         _tableView = this.FindAscendant<TableView>();
         _headerRow = this.FindAscendant<TableViewHeaderRow>();
         _optionsButton = GetTemplateChild("OptionsButton") as Button;
-        _optionsFlyout = GetTemplateChild("OptionsFlyout") as TableViewFilterMenuFlyout;
+        // DH-2252: a template that still declares the menu (an OptionsFlyout part under the button) keeps it, built
+        // with the template as before. The default template does not, and the menu is built on its first open.
+        var declaredFlyout = GetTemplateChild("OptionsFlyout") as TableViewFilterMenuFlyout;
+        _optionsFlyout = declaredFlyout ?? (_optionsFlyout is { IsDeclared: false } built ? built : null);
         _contentPresenter = GetTemplateChild("ContentPresenter") as ContentPresenter;
         _v_gridLine = GetTemplateChild("VerticalGridLine") as Rectangle;
 
-        if (_tableView is null || _optionsButton is null || _optionsFlyout is null)
+        if (_tableView is null || _optionsButton is null)
         {
             return;
         }
 
-        _optionsFlyout.TableView = _tableView;
-        _optionsFlyout.ColumnHeader = this;
-
         _optionsButton.Tapped += OnOptionsButtonTaped;
 
-        SetOptionCommands();
+        if (declaredFlyout is not null)
+        {
+            declaredFlyout.IsDeclared = true;
+            declaredFlyout.TableView = _tableView;
+            declaredFlyout.ColumnHeader = this;
+            SetOptionCommands();
+        }
+        else
+        {
+            _optionsButton.Click += OnOptionsButtonClick;
+        }
+
         SetFilterButtonVisibility();
         EnsureGridLines();
         OnSortDirectionChanged();
+        // DH-2252: a header realised after its column was filtered must show it (OnIsFilteredChanged ran on no template).
+        OnIsFilteredChanged();
     }
+
+    /// <summary>
+    /// Opens the options menu from the options button when the template does not declare one (Datgel fork, DH-2252).
+    /// </summary>
+    private void OnOptionsButtonClick(object sender, RoutedEventArgs e)
+    {
+        ShowOptionsFlyout();
+    }
+
+    /// <summary>
+    /// Shows the options menu at the options button, building it first if this is its first open (Datgel fork, DH-2252).
+    /// </summary>
+    internal void ShowOptionsFlyout()
+    {
+        if (_optionsButton is null)
+        {
+            return;
+        }
+
+        EnsureOptionsFlyout()?.ShowAt(_optionsButton);
+    }
+
+    /// <summary>
+    /// The options menu, built on first use when the template does not declare it (Datgel fork, DH-2252). Null before
+    /// the template is applied.
+    /// </summary>
+    internal TableViewFilterMenuFlyout? EnsureOptionsFlyout()
+    {
+        if (_optionsFlyout is null && _tableView is not null)
+        {
+            _optionsFlyout = CreateOptionsFlyout();
+        }
+
+        _optionsFlyout?.TableView = _tableView;
+        _optionsFlyout?.ColumnHeader = this;
+        return _optionsFlyout;
+    }
+
+    /// <summary>Whether the options menu has been built (Datgel fork, DH-2252): it is not until it is first opened.</summary>
+    internal bool HasOptionsFlyout => _optionsFlyout is not null;
+
+    /// <summary>
+    /// Whether this header's template is deferred because it was out of the horizontal viewport when it was created
+    /// (Datgel fork, DH-2252): it keeps its column, width and place, but builds no visual tree until it comes into view.
+    /// </summary>
+    internal bool IsTemplateDeferred { get; private set; }
+
+    /// <summary>
+    /// Gets whether this header is an element in the header row's visual tree (Datgel fork, DH-3839). Always true once
+    /// the header row has placed it, unless the table virtualises its headers
+    /// (<see cref="TableView.VirtualizesColumnHeaders"/>) and this column is outside the realisation band: such a
+    /// header keeps its column, width and state, but has no place, size, template or UI Automation peer until it
+    /// scrolls into view. Never transform, measure or hit-test a header that is not realised.
+    /// </summary>
+    public bool IsRealized { get; internal set; }
+
+    /// <summary>
+    /// Withholds the template (a local <c>null</c> Template, which outranks the style's) until
+    /// <see cref="EnsureTemplate"/> (Datgel fork, DH-2252).
+    /// </summary>
+    internal void DeferTemplate()
+    {
+        if (IsTemplateDeferred)
+            return;
+        IsTemplateDeferred = true;
+        Template = null;
+    }
+
+    /// <summary>Gives a deferred header its template back (the style's). Does nothing otherwise.</summary>
+    internal void EnsureTemplate()
+    {
+        if (!IsTemplateDeferred)
+            return;
+        IsTemplateDeferred = false;
+        ClearValue(TemplateProperty);
+        // Uno's Control.OnTemplateChanged only removes the old visual: it neither applies the new template nor
+        // invalidates measure, and this header's size is fixed, so nothing else would. Measured on the Skia head
+        // (Datgel Hub's grid-open harness): without these two lines an in-view header never got its template back.
+        ApplyTemplate();
+        InvalidateMeasure();
+    }
+
+    /// <summary>
+    /// Whether this header may defer its template (Datgel fork, DH-2252): the table defers off-screen headers, and the
+    /// column is not frozen (the frozen panel never scrolls) and has an absolute width (an auto width is measured from
+    /// the header, and a star width from the table, so neither is known without it).
+    /// </summary>
+    internal bool ShouldDeferTemplate() =>
+        Column is { IsFrozen: false, Width.IsAbsolute: true } column
+        && (_tableView ?? column.TableView) is { DefersOffscreenColumnHeaders: true };
 
     /// <summary>
     /// Handles the Tapped event for the options button.
@@ -392,6 +498,15 @@ public partial class TableViewColumnHeader : ContentControl
     {
         e.Handled = true;
     }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Datgel fork (DH-1944): v1.5.0's own header peer, now that its localized control type comes from
+    /// <see cref="TableViewLocalizedStrings"/> (and so from <see cref="TableViewLocalization.StringResolver"/>)
+    /// rather than an English literal. It is the DH-1445 header peer plus Invoke (cycles the sort) and
+    /// sort/filter hints, with the same name rule: <c>AutomationProperties.Name</c> first, then the header text.
+    /// </remarks>
+    protected override AutomationPeer OnCreateAutomationPeer() => new AutomationPeers.TableViewColumnHeaderAutomationPeer(this);
 
     /// <summary>
     /// Handles changes to the SortDirection property.
@@ -445,15 +560,47 @@ public partial class TableViewColumnHeader : ContentControl
                 0) : Padding;
     }
 
+    /// <summary>The default reach of the column-resize grip into a header, per side of the boundary, in DIP (mouse/pen).</summary>
+    internal const double DefaultResizeAreaWidth = 4;
+
+    /// <summary>The minimum reach of the column-resize grip for a touch contact, per side of the boundary, in DIP.</summary>
+    internal const double TouchResizeAreaWidth = 8;
+
+    /// <summary>
+    /// The grip's reach into this header for <paramref name="deviceType"/>: <see cref="TableView.ColumnResizeAreaWidth"/>
+    /// (at least 1), and at least <see cref="TouchResizeAreaWidth"/> for touch.
+    /// </summary>
+    internal static double ResizeAreaWidth(double configured, PointerDeviceType deviceType)
+    {
+        var width = double.IsNaN(configured) || configured < 1 ? 1 : configured;
+        return deviceType == PointerDeviceType.Touch ? Math.Max(width, TouchResizeAreaWidth) : width;
+    }
+
+    /// <summary>
+    /// Whether a point <paramref name="x"/> DIP from a header's left edge is inside the grip at its RIGHT edge.
+    /// Pure, so it is directly unit-testable.
+    /// </summary>
+    internal static bool IsInRightResizeArea(double x, double y, double headerWidth, double gripHeight, double areaWidth) =>
+        x >= headerWidth - areaWidth && y < gripHeight;
+
+    /// <summary>
+    /// Whether a point <paramref name="x"/> DIP from a header's left edge is inside the grip at its LEFT edge (the
+    /// previous column's half of the boundary). Pure, so it is directly unit-testable.
+    /// </summary>
+    internal static bool IsInLeftResizeArea(double x, double y, double headerHeight, double areaWidth) =>
+        x <= areaWidth && y < headerHeight;
+
+    private double ResizeAreaWidth(PointerRoutedEventArgs args) =>
+        ResizeAreaWidth(_tableView?.ColumnResizeAreaWidth ?? DefaultResizeAreaWidth, args.Pointer.PointerDeviceType);
+
     /// <summary>
     /// Determines whether the cursor is in the right resize area.
     /// </summary>
     private bool IsCursorInRightResizeArea(PointerRoutedEventArgs args)
     {
-        var resizeWidth = args.Pointer.PointerDeviceType == PointerDeviceType.Touch ? 8 : 4;
         var point = args.GetCurrentPoint(this);
         var resizeHeight = ActualHeight - (CanFilter ? _optionsButton?.ActualHeight ?? 0 : 0);
-        return ActualWidth - point.Position.X <= resizeWidth && point.Position.Y < resizeHeight;
+        return IsInRightResizeArea(point.Position.X, point.Position.Y, ActualWidth, resizeHeight, ResizeAreaWidth(args));
     }
 
     /// <summary>
@@ -461,9 +608,8 @@ public partial class TableViewColumnHeader : ContentControl
     /// </summary>
     private bool IsCursorInLeftResizeArea(PointerRoutedEventArgs args)
     {
-        var resizeArea = args.Pointer.PointerDeviceType == PointerDeviceType.Touch ? 8 : 4;
         var point = args.GetCurrentPoint(this);
-        return point.Position.X <= resizeArea && point.Position.Y < ActualHeight;
+        return IsInLeftResizeArea(point.Position.X, point.Position.Y, ActualHeight, ResizeAreaWidth(args));
     }
 
     /// <inheritdoc/>
@@ -481,7 +627,7 @@ public partial class TableViewColumnHeader : ContentControl
 
         var position = e.GetPosition(this);
 
-        if (position.X <= 8 && _headerRow?.GetPreviousHeader(this) is { Column: { } } header)
+        if (position.X <= Math.Max(TouchResizeAreaWidth, _tableView.ColumnResizeAreaWidth) && _headerRow?.GetPreviousHeader(this) is { Column: { } } header)
         {
             header.Column.Width = GridLength.Auto;
         }
@@ -499,6 +645,8 @@ public partial class TableViewColumnHeader : ContentControl
         if ((_resizeStarted || _resizePreviousStarted) && _resizingColumn is not null
             && _resizeTargetHeader is not null && _tableView is not null)
         {
+            if (!_resizingColumn.IsResizing) BeginResize(_resizingColumn);
+
             var delta = e.GetCurrentPoint(_headerRow).Position.X - _resizeStartPointerX;
             var minWidth = _resizingColumn.MinWidth ?? _tableView.MinColumnWidth;
             var maxWidth = _resizingColumn.MaxWidth ?? _tableView.MaxColumnWidth;
@@ -569,7 +717,6 @@ public partial class TableViewColumnHeader : ContentControl
             _resizeStartingWidth = ActualWidth;
             _resizeStartPointerX = e.GetCurrentPoint(_headerRow).Position.X;
             _activeResizeMode = _tableView.ColumnResizeMode;
-            BeginResize(Column);
             CapturePointer(e.Pointer);
         }
         else if (IsSizingCursor && IsCursorInLeftResizeArea(e) && _tableView is not null
@@ -581,7 +728,6 @@ public partial class TableViewColumnHeader : ContentControl
             _resizeStartingWidth = header.ActualWidth;
             _resizeStartPointerX = e.GetCurrentPoint(_headerRow).Position.X;
             _activeResizeMode = _tableView.ColumnResizeMode;
-            BeginResize(header.Column);
             CapturePointer(e.Pointer);
         }
         else if (_tableView?.CanReorderColumns is true && Column?.CanReorder is true)
@@ -726,7 +872,7 @@ public partial class TableViewColumnHeader : ContentControl
         if (_v_gridLine is not null && _tableView is not null)
         {
             _v_gridLine.Fill = _tableView.HeaderGridLinesVisibility is TableViewGridLinesVisibility.All or TableViewGridLinesVisibility.Vertical
-                               ? _tableView.VerticalGridLinesStroke : new SolidColorBrush(Colors.Transparent);
+                               ? _tableView.VerticalGridLinesStroke : SharedResources.TransparentBrush;
             _v_gridLine.Width = _tableView.VerticalGridLinesStrokeThickness;
             _v_gridLine.Visibility = _tableView.HeaderGridLinesVisibility is TableViewGridLinesVisibility.All or TableViewGridLinesVisibility.Vertical
                                      || _tableView.GridLinesVisibility is TableViewGridLinesVisibility.All or TableViewGridLinesVisibility.Vertical
@@ -739,6 +885,20 @@ public partial class TableViewColumnHeader : ContentControl
     /// <see cref="MeasureOverride"/>.
     /// </summary>
     internal double? CachedDesiredWidth { get; private set; }
+
+    /// <summary>
+    /// Gets or sets the style of the options menu's presenter (Datgel fork, DH-2252). The default style sets it; the
+    /// menu itself is built on its first open rather than with the template.
+    /// </summary>
+    public Style? OptionsFlyoutPresenterStyle
+    {
+        get => (Style?)GetValue(OptionsFlyoutPresenterStyleProperty);
+        set => SetValue(OptionsFlyoutPresenterStyleProperty, value);
+    }
+
+    /// <summary>Identifies the <see cref="OptionsFlyoutPresenterStyle"/> dependency property.</summary>
+    public static readonly DependencyProperty OptionsFlyoutPresenterStyleProperty = DependencyProperty.Register(
+        nameof(OptionsFlyoutPresenterStyle), typeof(Style), typeof(TableViewColumnHeader), new PropertyMetadata(null));
 
     /// <summary>
     /// Gets or sets the column associated with the header.
@@ -793,9 +953,7 @@ public partial class TableViewColumnHeader : ContentControl
         }
     }
 
-    /// <inheritdoc/>
-    protected override AutomationPeer OnCreateAutomationPeer()
-    {
-        return new AutomationPeers.TableViewColumnHeaderAutomationPeer(this);
-    }
+    // Datgel fork (DH-1879): v1.5.0's own OnCreateAutomationPeer override stood here. Since DH-1944 the
+    // override above creates that same v1.5.0 peer (AutomationPeers.TableViewColumnHeaderAutomationPeer);
+    // see TableView.Accessibility.cs.
 }

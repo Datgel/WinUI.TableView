@@ -1,5 +1,6 @@
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -33,6 +34,7 @@ public partial class TableViewCell : ContentControl
     private object? _uneditedValue;
     private RoutedEventArgs? _editingArgs;
     private IList<TableViewConditionalCellStyle>? _cellStyles;
+    private bool? _lastAppliedSelection;
     private bool _resizePreviewActive;
     private double _resizePreviewWidth;
     private double _resizePreviewMaxWidth;
@@ -226,7 +228,8 @@ public partial class TableViewCell : ContentControl
             var bordersRect = new Rect(0, 0, _resizePreviewMaxWidth, finalSize.Height);
             _backgroundBorder?.Arrange(bordersRect);
             _selectionBorder?.Arrange(bordersRect);
-            _rootBorder?.Arrange(new Rect(0, 0, _resizePreviewWidth, finalSize.Height));
+            // Datgel DH-3839: the default template has no RootBorder; its presenter is the layer that was inside it.
+            ((FrameworkElement?)_rootBorder ?? _contentPresenter)?.Arrange(new Rect(0, 0, _resizePreviewWidth, finalSize.Height));
         }
 
         return finalSize;
@@ -234,9 +237,9 @@ public partial class TableViewCell : ContentControl
 
     /// <summary>
     /// Begins a live resize-drag preview for this cell: generously (re)measures its content once so
-    /// widening can freely reveal more of it, and creates this cell's own <see cref="Clip"/> geometry
+    /// widening can freely reveal more of it, and creates this cell's own <see cref="UIElement.Clip"/> geometry
     /// and gridline shift transform. These are per-cell instances (not shared across cells — WinUI
-    /// throws if the same <see cref="RectangleGeometry"/> is assigned as <see cref="Clip"/> on more
+    /// throws if the same <see cref="RectangleGeometry"/> is assigned as <see cref="UIElement.Clip"/> on more
     /// than one element at a time), mutated in place every frame by
     /// <see cref="UpdateResizePreviewClip"/>/<see cref="UpdateGridLineShift"/> — still no Measure/Arrange
     /// per frame, just not a single shared instance across every row.
@@ -486,10 +489,28 @@ public partial class TableViewCell : ContentControl
     /// Initiates editing mode for the current cell, raising the beginning edit event and allowing cancellation.
     /// </summary>
     /// <param name="editingArgs">The event data associated with the editing request. Cannot be null.</param>
+    /// <remarks>
+    /// <para>A column drawing itself through <see cref="TableViewColumn.UseSingleElement"/> never enters
+    /// an edit session, and that refusal is decided HERE - in the one method every route into a session
+    /// reaches - rather than once per caller. <see cref="OnDoubleTapped"/> and <see cref="BeginEdit"/>
+    /// each carry their own earlier check, so for them this is belt-and-braces; the keyboard route
+    /// (<c>TableView.HandleNavigations</c>, F2 and the tab/enter hop) carried none, so a check box or a
+    /// toggle switch DID enter a session. Nothing was regenerated - <see cref="SetEditingElement"/>
+    /// answers with the resting content on such a column - but <see cref="TableView"/> was left
+    /// reporting <c>IsEditing</c> with no editor behind it, and that state suppresses arrow-key
+    /// navigation, every cell's double-tap and every <see cref="BeginEdit"/> until it is ended.</para>
+    /// <para>Guarding the callers one at a time is what produced that gap: two of the three routes
+    /// remembered the flag and the third did not. A fourth route cannot forget.</para>
+    /// </remarks>
     /// <returns>A task that represents the asynchronous operation. The task result is <see langword="true"/> if cell editing was
     /// successfully started; otherwise, <see langword="false"/> if the operation was canceled.</returns>
     internal bool BeginCellEditing(RoutedEventArgs editingArgs)
     {
+        if (Column?.UseSingleElement is true)
+        {
+            return false;
+        }
+
         var args = new TableViewBeginningEditEventArgs(this, Row?.Content, Column!, editingArgs);
         TableView?.OnBeginningEdit(args);
 
@@ -503,11 +524,46 @@ public partial class TableViewCell : ContentControl
     }
 
     /// <summary>
+    /// Begins editing this cell, as a double tap or F2 does.
+    /// </summary>
+    /// <remarks>
+    /// The control starts an edit session from <see cref="OnDoubleTapped"/> and from the
+    /// <c>TableView</c> key handler, but offers no public way to ask for one. A column whose RESTING
+    /// cell carries an affordance of its own - a drop-down arrow, a picker button - needs to open the
+    /// editor on a single click of that affordance, and that is not a gesture the control can infer.
+    /// <para>The same conditions apply as to a double tap: a read-only cell, a cell with no owning
+    /// <see cref="TableView"/>, a table that is already editing, or a column drawing itself through
+    /// <see cref="TableViewColumn.UseSingleElement"/> will not begin an edit, and this returns
+    /// <see langword="false"/>. <c>BeginningEdit</c> is raised, and a handler that cancels it is
+    /// honoured, exactly as on the existing paths.</para>
+    /// <para>On v1.5.0 <c>BeginCellEditing</c> is synchronous, so the task is always already
+    /// complete. It stays <c>Task&lt;bool&gt;</c> because the v1.4.1 cut of this patch returned the
+    /// task (there <c>BeginCellEditing</c> was <c>async</c>), and consumers read
+    /// <c>IsCompletedSuccessfully</c>/<c>Result</c> synchronously; keeping the shape keeps them
+    /// source- and binary-compatible across the re-cut.</para>
+    /// </remarks>
+    /// <returns><see langword="true"/> if the cell entered edit mode; otherwise <see langword="false"/>.</returns>
+    public Task<bool> BeginEdit()
+    {
+        if (IsReadOnly || TableView is null || TableView.IsEditing || Column?.UseSingleElement is not false)
+        {
+            return Task.FromResult(false);
+        }
+
+        return Task.FromResult(BeginCellEditing(new RoutedEventArgs()));
+    }
+
+    /// <summary>
     /// Prepares the cell for editing.
     /// </summary>
     internal void PrepareForEdit(RoutedEventArgs editingArgs)
     {
+        // DH-2231: a single-element column edits its resting element, so a deferred one must exist first.
+        if (Column?.UseSingleElement is true)
+            EnsureElement();
+        EnsureTemplate(); // DH-2695: a cell being edited is on screen, so it has its template
         var editingElement = SetEditingElement();
+        IsElementDeferred = false;
         Content = editingElement;
 
         if (TableView is not null)
@@ -562,14 +618,112 @@ public partial class TableViewCell : ContentControl
     internal void EndEditing(TableViewEditAction editAction)
     {
         Column?.EndCellEditing(this, Row?.Content, editAction, _uneditedValue);
-        SetElement();
+        // The cell just edited is the current one and in view: never deferred (DH-2231).
+        RealizeElement(focus: true);
     }
 
     /// <summary>
-    /// Sets the element for the cell.
+    /// Sets the element for the cell, or - for a cell scrolled out of the horizontal viewport - defers building it
+    /// until it comes into view (<see cref="TableView.DefersOffscreenCellElements"/>, Datgel DH-2231).
     /// </summary>
     internal void SetElement()
     {
+        if (ShouldDeferElement() && !IsArrangedInView())
+        {
+            IsElementDeferred = true;
+            DeferTemplate(); // DH-2695: nor its template - neither is needed until it comes into view
+            if (Content is not null)
+                Content = null;
+            return;
+        }
+
+        RealizeElement(focus: true);
+    }
+
+    /// <summary>
+    /// Whether this cell has not built its element yet because it was out of view (Datgel DH-2231). It keeps its
+    /// place, width, index and slot; <see cref="EnsureElement"/> builds the element.
+    /// </summary>
+    internal bool IsElementDeferred { get; private set; }
+
+    /// <summary>
+    /// Whether this cell has not applied its template because its element is deferred (Datgel DH-2695). It keeps its
+    /// column, width, index and slot but has no visual tree at all - no borders, presenter or grid line - until its
+    /// element is built.
+    /// </summary>
+    /// <remarks>
+    /// Templating every cell of every realised row was what remained of a wide table's first layout after DH-2231
+    /// deferred the elements: Datgel Hub's LOCATION, 177 columns x 42 rows (21 realised), took 14-18 s to open, and a
+    /// CPU trace put ~40 % of it in the cell template's Build.
+    /// </remarks>
+    internal bool IsTemplateDeferred { get; private set; }
+
+    /// <summary>
+    /// Withholds the template (a local <c>null</c> Template, which outranks the style's) until
+    /// <see cref="EnsureTemplate"/> (Datgel DH-2695) - the mechanism a deferred column header uses (DH-2252).
+    /// </summary>
+    internal void DeferTemplate()
+    {
+        if (IsTemplateDeferred)
+            return;
+        IsTemplateDeferred = true;
+        Template = null;
+    }
+
+    /// <summary>Gives a deferred cell its template back (the style's). Does nothing otherwise.</summary>
+    internal void EnsureTemplate()
+    {
+        if (!IsTemplateDeferred)
+            return;
+        IsTemplateDeferred = false;
+        ClearValue(TemplateProperty);
+        // Uno's Control.OnTemplateChanged neither applies the new template nor invalidates measure (DH-2252), and a
+        // cell's width is fixed, so nothing else would.
+        ApplyTemplate();
+        InvalidateMeasure();
+    }
+
+    /// <summary>
+    /// Builds the element of a cell whose element was deferred (Datgel DH-2231). Does nothing otherwise.
+    /// </summary>
+    internal void EnsureElement()
+    {
+        if (IsElementDeferred)
+            RealizeElement(focus: false);
+    }
+
+    /// <summary>
+    /// Whether this cell may defer its element (Datgel DH-2231): the table defers off-screen elements, and the
+    /// column is not frozen (the frozen panel is never scrolled), not auto-width (its width is measured from its
+    /// cells' elements) and not marked <see cref="TableViewColumn.AlwaysRealizeElement"/> (a wrapping column
+    /// decides the row's height).
+    /// </summary>
+    internal bool ShouldDeferElement() =>
+        (TableView ?? Row?.TableView) is { DefersOffscreenCellElements: true }
+        && Column is { AlwaysRealizeElement: false, IsFrozen: false } column
+        && !column.Width.IsAuto;
+
+    /// <summary>
+    /// Whether this cell has been arranged and lies within <see cref="HorizontalCulling.Margin"/> of the viewport.
+    /// A cell not laid out yet is not known to be in view.
+    /// </summary>
+    private bool IsArrangedInView()
+    {
+        var tableView = TableView ?? Row?.TableView;
+        return tableView is not null
+               && tableView.ActualWidth > 0
+               && ActualWidth > 0
+               && HorizontalCulling.IsInView(ActualOffset.X, ActualWidth, tableView.HorizontalOffset, tableView.ActualWidth);
+    }
+
+    /// <summary>
+    /// Builds the element for the cell. <paramref name="focus"/> keeps the library's own focus request (Uno) for a
+    /// cell built normally; a cell realised because it scrolled into view must not take focus from the user.
+    /// </summary>
+    private void RealizeElement(bool focus)
+    {
+        EnsureTemplate(); // DH-2695: a cell with an element has its template
+        IsElementDeferred = false;
         var element = Column?.GenerateElement(this, Row?.Content);
 
         if (element is not null && Column is TableViewBoundColumn { ElementStyle: { } } boundColumn)
@@ -580,21 +734,27 @@ public partial class TableViewCell : ContentControl
         Content = element;
 
 #if !WINDOWS
-        DispatcherQueue.TryEnqueue(async () =>
+        if (focus)
         {
-            await Task.Delay(20);
-            Focus(FocusState.Pointer);
-        });
+            DispatcherQueue.TryEnqueue(async () =>
+            {
+                await Task.Delay(20);
+                Focus(FocusState.Pointer);
+            });
+        }
 #endif
 
         DispatcherQueue.TryEnqueue(InvalidateMeasure);
     }
 
     /// <summary>
-    /// Refreshes the element for the cell.
+    /// Refreshes the element for the cell. A deferred cell has none; it is built for the row's current item when it
+    /// comes into view.
     /// </summary>
     internal void RefreshElement()
     {
+        if (IsElementDeferred)
+            return;
         Column?.RefreshElement(this, Row?.Content);
     }
 
@@ -603,8 +763,20 @@ public partial class TableViewCell : ContentControl
     /// </summary>
     internal void ApplySelectionState()
     {
-        var stateName = IsSelected ? VisualStates.StateSelected : VisualStates.StateUnselected;
+        var isSelected = IsSelected;
+        var stateName = isSelected ? VisualStates.StateSelected : VisualStates.StateUnselected;
         VisualStates.GoToState(this, false, stateName);
+
+        // Tell a listening screen reader, so a selection change is announced rather than found. The
+        // first application after the cell is realized is its initial state, not a change.
+        var previous = _lastAppliedSelection;
+        _lastAppliedSelection = isSelected;
+        if (previous.HasValue && previous.Value != isSelected
+            && AutomationPeer.ListenerExists(AutomationEvents.PropertyChanged)
+            && FrameworkElementAutomationPeer.FromElement(this) is { } peer)
+        {
+            peer.RaisePropertyChangedEvent(SelectionItemPatternIdentifiers.IsSelectedProperty, previous.Value, isSelected);
+        }
     }
 
     /// <summary>
@@ -614,6 +786,10 @@ public partial class TableViewCell : ContentControl
     {
         var stateName = IsCurrent ? VisualStates.StateCurrent : VisualStates.StateRegular;
         VisualStates.GoToState(this, false, stateName);
+
+        // DH-2231: the current cell always has its element (keyboard toggles, focus and edits act on it).
+        if (IsCurrent)
+            EnsureElement();
 
         if (IsCurrent && !skipFocus)
         {
@@ -632,6 +808,8 @@ public partial class TableViewCell : ContentControl
     /// </summary>
     internal void UpdateElementState()
     {
+        if (IsElementDeferred)
+            return; // built in the current state when it comes into view (DH-2231)
         Column?.UpdateElementState(this, Row?.Content);
     }
 
@@ -658,7 +836,7 @@ public partial class TableViewCell : ContentControl
         if (_v_gridLine is not null && TableView is not null)
         {
             _v_gridLine.Fill = TableView.GridLinesVisibility is TableViewGridLinesVisibility.All or TableViewGridLinesVisibility.Vertical
-                               ? TableView.VerticalGridLinesStroke : new SolidColorBrush(Colors.Transparent);
+                               ? TableView.VerticalGridLinesStroke : SharedResources.TransparentBrush;
             _v_gridLine.Width = TableView.VerticalGridLinesStrokeThickness;
             _v_gridLine.Visibility = TableView.HeaderGridLinesVisibility is TableViewGridLinesVisibility.All or TableViewGridLinesVisibility.Vertical
                                      || TableView.GridLinesVisibility is TableViewGridLinesVisibility.All or TableViewGridLinesVisibility.Vertical
@@ -732,9 +910,31 @@ public partial class TableViewCell : ContentControl
     /// </summary>
     public TableView? TableView { get; internal set; }
 
+    /// <summary>
+    /// Sets this cell's Height, MinHeight and MaxHeight from <paramref name="tableView"/>'s row heights (Datgel DH-2718).
+    /// Called when the cell is created, when its row container is reused, and by TableView when a row height changes —
+    /// in place of three per-cell bindings. A value that is already right is not set again.
+    /// </summary>
+    internal void ApplyRowHeights(TableView tableView)
+    {
+        SetIfChanged(HeightProperty, Height, tableView.RowHeight);
+        SetIfChanged(MinHeightProperty, MinHeight, tableView.RowMinHeight);
+        SetIfChanged(MaxHeightProperty, MaxHeight, tableView.RowMaxHeight);
+
+        void SetIfChanged(DependencyProperty property, double current, double value)
+        {
+            // NaN != NaN, so an Auto height that stays Auto must be compared by IsNaN.
+            if (current.Equals(value))
+                return;
+            SetValue(property, value);
+        }
+    }
+
     /// <inheritdoc/>
     protected override AutomationPeer OnCreateAutomationPeer()
     {
-        return new AutomationPeers.TableViewCellAutomationPeer(this);
+        // Datgel fork (DH-1879): the DH-1445 peer (WinUI.TableView.Automation), not v1.5.0's
+        // AutomationPeers.TableViewCellAutomationPeer; see TableView.Accessibility.cs.
+        return new Automation.TableViewCellAutomationPeer(this);
     }
 }

@@ -1,8 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
-using System.Collections.Generic;
-using System.Linq;
 using WinUI.TableView.Controls;
 using WinUI.TableView.Extensions;
 
@@ -101,6 +99,12 @@ public partial class TableViewFilterMenuFlyout : Flyout
     }
 
     /// <summary>
+    /// Whether this menu was declared by the header's template (an <c>OptionsFlyout</c> part) rather than built on its
+    /// first open (Datgel fork, DH-2252).
+    /// </summary>
+    internal bool IsDeclared { get; set; }
+
+    /// <summary>
     /// Gets or sets the TableView associated with this filter menu flyout.
     /// </summary>
     public TableView? TableView { get; set; }
@@ -113,5 +117,5 @@ public partial class TableViewFilterMenuFlyout : Flyout
     /// <summary>
     /// Gets or sets the collection of menu items to be displayed in the filter flyout.
     /// </summary>
-    public IList<MenuFlyoutItemBase> Items { get; set; }
+    public List<MenuFlyoutItemBase> Items { get; set; }
 }

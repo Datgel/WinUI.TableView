@@ -11,6 +11,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Windows.Foundation;
 using WinUI.TableView.Extensions;
+using WinUI.TableView.Helpers;
 
 namespace WinUI.TableView;
 
@@ -181,12 +182,18 @@ public partial class TableViewRowPresenter : Control
                     };
             }
 
+            // DH-2215: in the panel's own coordinates the viewport starts at HorizontalOffset (the clip above starts
+            // there too), and the table's width bounds it from above (TableView.RefreshCulling re-runs this when the
+            // width changes: it is 0 on the first pass). Opacity only, so no layout is invalidated.
+            HorizontalCulling.Apply(_scrollableCellsPanel, TableView.HorizontalOffset, TableView.ActualWidth, TableView.CullsOffscreenColumns);
+            // DH-2231: the same pass builds the deferred elements that have come into view; a frozen cell is always in view.
+            HorizontalCulling.RealizeAll(_frozenCellsPanel);
 
             // CellsHorizontalOffset is the boundary between the row header and the data cells — it's
             // positioned purely by HeaderColumn's width (see TableViewRowPresenter.xaml's ColumnDefinitions),
             // so it never depends on any data column's width and is safe to skip recomputing (via a real
             // TransformToVisual walk, on every visible row) during a resize drag.
-            if (TableView is not null && !TableView.IsColumnResizing && _v_gridLine is not null)
+            if (TableView.CollectionView.Count > 0 && !TableView.IsColumnResizing && _v_gridLine is not null)
             {
                 var transform = _v_gridLine.TransformToVisual(this);
                 var relativePosition = transform.TransformPoint(new Point(0, 0));
@@ -270,9 +277,15 @@ public partial class TableViewRowPresenter : Control
     /// <summary>
     /// Handles the Tapped event of the details toggle button.
     /// </summary>
-    private void OnDetailsToggleButtonTapped(object sender, TappedRoutedEventArgs e)
+    private async void OnDetailsToggleButtonTapped(object sender, TappedRoutedEventArgs e)
     {
-        ToggleDetailsPane(TableViewRow?.Content, _detailsToggleButton!.IsChecked ?? false);
+        var isVisible = _detailsToggleButton!.IsChecked ?? false;
+        ToggleDetailsPane(TableViewRow?.Content, isVisible);
+
+        if (isVisible && TableViewRow is not null)
+        {
+            await TableViewRow.ScrollIntoViewAfterDetailsPaneVisibility();
+        }
     }
 
     /// <summary>
@@ -361,23 +374,9 @@ public partial class TableViewRowPresenter : Control
 
     internal void SetRowHeaderBindings()
     {
-        _rowHeader?.SetBinding(HeightProperty, new Binding
-        {
-            Path = new PropertyPath($"{nameof(TableViewRowHeader.TableView)}.{nameof(TableView.RowHeight)}"),
-            RelativeSource = new RelativeSource { Mode = RelativeSourceMode.Self }
-        });
-
-        _rowHeader?.SetBinding(MaxHeightProperty, new Binding
-        {
-            Path = new PropertyPath($"{nameof(TableViewRowHeader.TableView)}.{nameof(TableView.RowMaxHeight)}"),
-            RelativeSource = new RelativeSource { Mode = RelativeSourceMode.Self }
-        });
-
-        _rowHeader?.SetBinding(MinHeightProperty, new Binding
-        {
-            Path = new PropertyPath($"{nameof(TableViewRowHeader.TableView)}.{nameof(TableView.RowMinHeight)}"),
-            RelativeSource = new RelativeSource { Mode = RelativeSourceMode.Self }
-        });
+        _rowHeader?.SetBinding(HeightProperty, SharedResources.RowHeightBinding);
+        _rowHeader?.SetBinding(MaxHeightProperty, SharedResources.RowMaxHeightBinding);
+        _rowHeader?.SetBinding(MinHeightProperty, SharedResources.RowMinHeightBinding);
     }
 
     /// <summary>
@@ -404,7 +403,7 @@ public partial class TableViewRowPresenter : Control
                                                     && (TableView.RowDetailsTemplate is not null || TableView.RowDetailsTemplateSelector is not null);
 
                 _v_gridLine.Fill = TableView.GridLinesVisibility is TableViewGridLinesVisibility.All or TableViewGridLinesVisibility.Vertical
-                                   ? TableView.VerticalGridLinesStroke : new SolidColorBrush(Colors.Transparent);
+                                   ? TableView.VerticalGridLinesStroke : SharedResources.TransparentBrush;
                 _v_gridLine.Width = TableView.VerticalGridLinesStrokeThickness;
                 _v_gridLine.Visibility = vGridLinesVisibility && (areHeadersVisible || isMultiSelection || isDetailsToggleButtonVisible) ? Visibility.Visible : Visibility.Collapsed;
             }
@@ -427,10 +426,19 @@ public partial class TableViewRowPresenter : Control
     /// <param name="cell">The cell to insert.</param>
     public void InsertCell(TableViewCell cell)
     {
-        if (TableView is null || cell is not { Column: { } column }) return;
+        if (TableView is null) return;
 
-        var _frozenColumns = TableView.Columns.VisibleColumns.Where(x => x.IsFrozen).ToList();
-        var _scrollableColumns = TableView.Columns.VisibleColumns.Where(x => !x.IsFrozen).ToList();
+        var visibleColumns = TableView.Columns.VisibleColumns;
+        InsertCell(cell, visibleColumns.Where(x => x.IsFrozen).ToList(), visibleColumns.Where(x => !x.IsFrozen).ToList());
+    }
+
+    /// <summary>
+    /// Inserts a cell given the visible frozen and scrollable columns, so a caller adding a whole row of cells reads
+    /// <see cref="TableViewColumnsCollection.VisibleColumns"/> once rather than twice per cell (Datgel DH-2695).
+    /// </summary>
+    internal void InsertCell(TableViewCell cell, IList<TableViewColumn> _frozenColumns, IList<TableViewColumn> _scrollableColumns)
+    {
+        if (TableView is null || cell is not { Column: { } column }) return;
 
         if (cell is { Column.IsFrozen: true } && _frozenCellsPanel is not null)
         {
@@ -443,6 +451,20 @@ public partial class TableViewRowPresenter : Control
         else if (_scrollableCellsPanel is not null)
         {
             var index = _scrollableColumns.IndexOf(column);
+            if (TableView.VirtualizesColumns)
+            {
+                // Datgel DH-2718: the panel holds only the realised cells, so the place is after every realised cell
+                // whose column comes earlier.
+                var at = 0;
+                foreach (var child in _scrollableCellsPanel.Children)
+                {
+                    if (child is TableViewCell { Column: { } other } && _scrollableColumns.IndexOf(other) < index)
+                        at++;
+                }
+
+                index = Math.Min(at, _scrollableCellsPanel.Children.Count);
+            }
+
             index = Math.Min(index, _scrollableColumns.Count);
             index = Math.Max(index, 0); // handles -ve index;
 
@@ -510,6 +532,54 @@ public partial class TableViewRowPresenter : Control
     }
 
     /// <summary>
+    /// Places a virtualising row's realised scrollable cells where they would be if every column had a cell (Datgel
+    /// DH-2718): each takes, as its left margin, the width of the columns between it and the previous realised cell, and
+    /// the panel is at least as wide as all the scrollable columns. No-op when the table does not virtualise columns.
+    /// </summary>
+    internal void UpdateColumnGaps()
+    {
+        if (TableView is not { VirtualizesColumns: true } tableView || _scrollableCellsPanel is null)
+            return;
+
+        var starts = new Dictionary<TableViewColumn, double>();
+        var total = 0d;
+        foreach (var column in tableView.Columns.VisibleColumns)
+        {
+            if (column.IsFrozen)
+                continue;
+            starts[column] = total;
+            var width = TableViewRow.LayoutWidth(column);
+            total += double.IsNaN(width) ? 0 : width;
+        }
+
+        var end = 0d;
+        foreach (var child in _scrollableCellsPanel.Children)
+        {
+            if (child is not TableViewCell { Column: { } column } cell || !starts.TryGetValue(column, out var start))
+                continue;
+
+            var left = Math.Max(0, start - end);
+            if (cell.Margin.Left != left || cell.Margin.Right != 0 || cell.Margin.Top != 0 || cell.Margin.Bottom != 0)
+                cell.Margin = new Thickness(left, 0, 0, 0);
+            var width = TableViewRow.LayoutWidth(column);
+            end = start + (double.IsNaN(width) ? cell.Width : width);
+        }
+
+        if (_scrollableCellsPanel.MinWidth != total)
+            _scrollableCellsPanel.MinWidth = total;
+    }
+
+    /// <summary>Undoes <see cref="UpdateColumnGaps"/> when a table stops virtualising its columns (Datgel DH-2718).</summary>
+    internal void ResetColumnGaps()
+    {
+        if (_scrollableCellsPanel is null)
+            return;
+        _scrollableCellsPanel.ClearValue(MinWidthProperty);
+        foreach (var child in _scrollableCellsPanel.Children)
+            child.ClearValue(FrameworkElement.MarginProperty);
+    }
+
+    /// <summary>
     /// Clears all cells from the presenter.
     /// </summary>
     public void ClearCells()
@@ -558,7 +628,7 @@ public partial class TableViewRowPresenter : Control
     /// <see cref="TableViewRowDetailsVisibilityMode.VisibleWhenExpanded"/>.
     /// </summary>
     /// <param name="visible"><see langword="true"/> to expand; <see langword="false"/> to collapse.</param>
-    internal void ShowDetailPane(bool visible)
+    internal async void ShowDetailPane(bool visible)
     {
         if (TableView?.RowDetailsVisibilityMode is TableViewRowDetailsVisibilityMode.VisibleWhenExpanded)
         {
@@ -568,6 +638,11 @@ public partial class TableViewRowPresenter : Control
             }
 
             ToggleDetailsPane(TableViewRow?.Content, visible);
+
+            if (visible && TableViewRow is not null)
+            {
+                await TableViewRow.ScrollIntoViewAfterDetailsPaneVisibility();
+            }
         }
     }
 }

@@ -375,6 +375,7 @@ public class TableViewAutomationPeerTests
         Assert.IsNotNull(result);
     }
 
+#if WINDOWS // Datgel fork (DH-2825): the DH-1445 peers (WinUI.TableView.Automation) are Windows-only.
     // ─── OnCreateAutomationPeer wiring ──────────────────────────────────────
 
     // Datgel fork (DH-1879): the controls create the DH-1445 peers (WinUI.TableView.Automation), not
@@ -434,6 +435,7 @@ public class TableViewAutomationPeerTests
 
         Assert.IsNotInstanceOfType(peer, typeof(TableViewRowHeaderAutomationPeer));
     }
+#endif
 
     // ─── Localized automation text ──────────────────────────────────────────
     // Each test swaps the resource value for a sentinel, so it fails on a peer that returns an

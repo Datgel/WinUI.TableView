@@ -1,3 +1,5 @@
+// Datgel fork (DH-2825): Windows-only, as when the fork's tests had their own Windows test project.
+#if WINDOWS
 using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Microsoft.VisualStudio.TestTools.UnitTesting.AppContainer;
@@ -113,3 +115,4 @@ public class TableViewLocalizationTests
         Assert.AreEqual("Baris", new TableViewRowAutomationPeer(new TableViewRow()).GetName());
     }
 }
+#endif

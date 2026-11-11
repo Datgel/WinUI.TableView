@@ -1,3 +1,5 @@
+// Datgel fork (DH-2825): Windows-only, as when the fork's tests had their own Windows test project.
+#if WINDOWS
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Data;
@@ -218,3 +220,4 @@ public class ColumnVirtualizationTests
         public string Name { get; set; } = string.Empty;
     }
 }
+#endif

@@ -20,9 +20,13 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="local:TableViewCell">
-                    <Grid BorderBrush="{TemplateBinding BorderBrush}"
-                          BorderThickness="{TemplateBinding BorderThickness}"
-                          CornerRadius="{TemplateBinding CornerRadius}">
+                    <!-- Datgel fork (DH-5839): no TemplateBindings. TableViewCell copies BorderBrush, BorderThickness,
+                         CornerRadius, Background, Padding and the content alignments onto RootGrid, BackgroundBorder and
+                         Content itself (TableViewCell.SyncTemplateParts) when the template names RootGrid. Seven
+                         TemplateBindings per cell were seven Uno BindingExpressions (weak-reference pool work under a
+                         lock) for every realised cell - ~2,800 on a wide table's first layout. A template that does not
+                         name RootGrid keeps its own bindings and is left alone. -->
+                    <Grid x:Name="RootGrid">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
@@ -59,7 +63,6 @@
                         </VisualStateManager.VisualStateGroups>
 
                         <Border x:Name="BackgroundBorder"
-                                Background="{TemplateBinding Background}"
                                 CornerRadius="{ThemeResource TableViewRowCellSelectionBorderCornerRadius}" />
 
                         <Border x:Name="SelectionBorder"
@@ -72,10 +75,7 @@
                              table's first layout, each with a UI Automation provider on Uno's Win32 head). A template
                              that still declares a RootBorder keeps working: TableViewCell looks it up by name. -->
                         <ContentPresenter x:Name="Content"
-                                          CornerRadius="{ThemeResource TableViewRowCellSelectionBorderCornerRadius}"
-                                          Padding="{TemplateBinding Padding}"
-                                          VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
-                                          HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}" />
+                                          CornerRadius="{ThemeResource TableViewRowCellSelectionBorderCornerRadius}" />
 
                         <Rectangle x:Name="VerticalGridLine"
                                    Grid.Column="1"

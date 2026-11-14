@@ -107,7 +107,7 @@ public partial class TableViewCell : ContentControl
         if (_rootGrid is not null)
         {
             RegisterSyncCallbacks();
-            SyncTemplateParts(null);
+            // NEGATIVE CONTROL: no initial sync
         }
 
         EnsureGridLines();
@@ -126,7 +126,7 @@ public partial class TableViewCell : ContentControl
         if (_syncCallbacksRegistered) return;
         _syncCallbacksRegistered = true;
         foreach (var property in s_syncedProperties)
-            RegisterPropertyChangedCallback(property, static (d, dp) => ((TableViewCell)d).SyncTemplateParts(dp));
+            _ = property; // NEGATIVE CONTROL
     }
 
     /// <summary>

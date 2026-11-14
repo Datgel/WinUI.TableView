@@ -117,7 +117,7 @@ public partial class TableViewColumnsCollection : DependencyObjectCollection, IT
     internal void HandleColumnPropertyChanged(TableViewColumn column, string propertyName)
     {
         if (propertyName is nameof(TableViewColumn.Visibility) or nameof(TableViewColumn.Order))
-            InvalidateVisibleColumns(-1);
+            { } // NEGATIVE CONTROL: never invalidated on Visibility/Order
 
         if (Contains(column) && !_movingColumn)
         {

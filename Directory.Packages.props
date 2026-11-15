@@ -7,12 +7,13 @@
     <PackageVersion Include="Microsoft.Extensions.Logging.Debug" Version="9.0.4" />
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="1.1.1" />
     <PackageVersion Include="Microsoft.Windows.SDK.BuildTools.WinApp" Version="0.4.0" />
-    <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
-    <PackageVersion Include="Microsoft.WindowsAppSDK.WinUI" Version="1.8.260528001" />
+    <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+    <!-- DH-2969: Uno 7 builds Windows heads on Windows App SDK 2.x. 2.3.6 is the WinUI component of
+         WinAppSDK 2.4.0, the oldest 2.x a consumer may run on (Uno 7 needs >= 2.4.0). -->
+    <PackageVersion Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.6" />
     <!-- The WinUI test project gets its MSTest/MTP versions from MSTest.Sdk. -->
     <PackageVersion Include="MSTest.TestAdapter" Version="3.9.3" Condition="'$(MSBuildProjectName)' == 'WinUI.TableView.Tests.Uno'" />
     <PackageVersion Include="MSTest.TestFramework" Version="3.9.3" Condition="'$(MSBuildProjectName)' == 'WinUI.TableView.Tests.Uno'" />
-    <PackageVersion Include="Uno.WinUI" Version="6.2.87" Condition="$([MSBuild]::VersionLessThan($([MSBuild]::GetTargetFrameworkVersion('$(TargetFramework)')), 'v9.0'))" />
-    <PackageVersion Include="Uno.WinUI" Version="6.5.237" Condition="!$([MSBuild]::VersionLessThan($([MSBuild]::GetTargetFrameworkVersion('$(TargetFramework)')), 'v9.0'))" />
+    <PackageVersion Include="Uno.WinUI" Version="7.0.65" />
   </ItemGroup>
 </Project>

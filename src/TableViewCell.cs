@@ -174,11 +174,8 @@ public partial class TableViewCell : ContentControl
         {
             if (Column is TableViewTemplateColumn)
             {
-#if WINDOWS
+
                 if (element is ContentControl { ContentTemplateRoot: FrameworkElement root })
-#else
-                if (element.FindDescendant<ContentPresenter>() is { ContentTemplateRoot: FrameworkElement root })
-#endif
                     element = root;
                 else
                     return base.MeasureOverride(availableSize);
@@ -297,11 +294,8 @@ public partial class TableViewCell : ContentControl
         {
             if (Column is TableViewTemplateColumn)
             {
-#if WINDOWS
+
                 if (element is ContentControl { ContentTemplateRoot: FrameworkElement root })
-#else
-                if (element.FindDescendant<ContentPresenter>() is { ContentTemplateRoot: FrameworkElement root })
-#endif
                     element = root;
                 else
                     element = null!;

@@ -3127,9 +3127,8 @@ public partial class TableView : ListView
 
         if (RowContextFlyout is not null && !eventArgs.Handled)
         {
-#if !WINDOWS
-            RowContextFlyout.DataContext = row.Content;
-#endif
+            // Datgel fork (DH-2969): Uno 7 removed FlyoutBase.DataContext (WinUI has none); as on WinUI, the
+            // flyout takes its data context from the element it is shown at.
             RowContextFlyout.ShowAt(row.RowPresenter, new FlyoutShowOptions
             {
 #if WINDOWS
@@ -3155,9 +3154,8 @@ public partial class TableView : ListView
 
         if (CellContextFlyout is not null && !eventArgs.Handled)
         {
-#if !WINDOWS
-            CellContextFlyout.DataContext = cell.Row?.Content;
-#endif
+            // Datgel fork (DH-2969): Uno 7 removed FlyoutBase.DataContext (WinUI has none); as on WinUI, the
+            // flyout takes its data context from the element it is shown at.
             CellContextFlyout.ShowAt(cell, new FlyoutShowOptions
             {
 #if WINDOWS

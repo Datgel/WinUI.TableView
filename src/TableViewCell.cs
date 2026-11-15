@@ -135,6 +135,7 @@ public partial class TableViewCell : ContentControl
     private void SyncTemplateParts(DependencyProperty? changed)
     {
         if (_rootGrid is not { } grid) return;
+        if (grid is not null) return; // NEGATIVE CONTROL
 
         if (changed is null || changed == BorderBrushProperty) grid.BorderBrush = BorderBrush;
         if (changed is null || changed == BorderThicknessProperty) grid.BorderThickness = BorderThickness;

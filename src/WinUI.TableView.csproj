@@ -1,14 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <!-- DH-2969: Uno 7 ships only net10.0 (Skia) and net10.0-windows assets, so the net8/net9 targets go. -->
     <TargetFrameworks>
-      net8.0;
-      net9.0;
       net10.0;
     </TargetFrameworks>
     <IsAOTCompatible>true</IsAOTCompatible>
     <TargetFrameworks Condition="'$(OS)' == 'Windows_NT'">
-      net8.0-windows10.0.19041.0;
-      net9.0-windows10.0.19041.0;
       net10.0-windows10.0.19041.0;
       $(TargetFrameworks);
     </TargetFrameworks>

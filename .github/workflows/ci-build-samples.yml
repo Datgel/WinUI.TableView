@@ -48,6 +48,12 @@ jobs:
           artifacts/binlogs/build-winui-sample-${{ matrix.architecture }}.binlog
 
   build-uno-desktop:
+    # DH-2969 (Uno 7): the Uno sample references CommunityToolkit.WinUI.Controls.SettingsControls,
+    # whose newest build (8.3.260402-preview2) is compiled against Uno.WinUI 5.5/6 and binds
+    # Uno.dll types (CoreDispatcher) that Uno 7 no longer ships, so its generated
+    # BindableMetadata is CS0012. The LIBRARY's Uno build is covered by ci-build (Uno Desktop /
+    # WebAssembly tests). Re-enable once the Toolkit ships an Uno 7 build.
+    if: false
     runs-on: windows-latest
 
     steps:
@@ -80,6 +86,12 @@ jobs:
           artifacts/binlogs/build-uno-desktop.binlog
 
   build-uno-wasm:
+    # DH-2969 (Uno 7): the Uno sample references CommunityToolkit.WinUI.Controls.SettingsControls,
+    # whose newest build (8.3.260402-preview2) is compiled against Uno.WinUI 5.5/6 and binds
+    # Uno.dll types (CoreDispatcher) that Uno 7 no longer ships, so its generated
+    # BindableMetadata is CS0012. The LIBRARY's Uno build is covered by ci-build (Uno Desktop /
+    # WebAssembly tests). Re-enable once the Toolkit ships an Uno 7 build.
+    if: false
     env:
       DIST_PATH: samples/WinUI.TableView.SampleApp.Uno/bin/Release/net10.0-browserwasm/publish/wwwroot
       DotnetVersion: '10.0.100'

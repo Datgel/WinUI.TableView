@@ -6,7 +6,8 @@ on:
     paths-ignore:
       - 'samples/**'
   pull_request:
-    branches: main
+    # DH-2969: also the fork's patched lines, so a PR into datgel/v1.5.1-patched (Uno 7) builds and tests.
+    branches: [ main, 'datgel/v*-patched' ]
     paths-ignore:
       - 'samples/**'
 

@@ -2,14 +2,14 @@
   <ItemGroup>
     <PackageVersion Include="ClosedXML" Version="0.105.0" />
     <PackageVersion Include="ColorCode.WinUI" Version="2.0.15" />
-    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.0" />
-    <PackageVersion Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />
+    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Debug" Version="9.0.4" />
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="1.1.1" />
     <PackageVersion Include="Microsoft.Windows.SDK.BuildTools.WinApp" Version="0.4.0" />
     <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
     <!-- DH-2969: Uno 7 builds Windows heads on Windows App SDK 2.x. 2.3.6 is the WinUI component of
-         WinAppSDK 2.4.0, the oldest 2.x a consumer may run on (Uno 7 needs >= 2.4.0). -->
+         WinAppSDK 2.4.0, the oldest 2.x a consumer may run on (Uno 7 needs >= 2.4.0). Upstream v1.5.2
+         keeps WinUI 1.8 because it still ships net8/net9; this line is net10-only. -->
     <PackageVersion Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.6" />
     <!-- The WinUI test project gets its MSTest/MTP versions from MSTest.Sdk. -->
     <PackageVersion Include="MSTest.TestAdapter" Version="3.9.3" Condition="'$(MSBuildProjectName)' == 'WinUI.TableView.Tests.Uno'" />

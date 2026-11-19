@@ -167,7 +167,7 @@ jobs:
             Write-Host "::warning::$env:PACKAGE_VERSION is already on the feed (dry run, so not fatal)."
           }
           # Reference = newest stable version OF THIS LINE (X.Y.Z) on the feed: the layout its
-          # consumers restore today. DH-2969: lines run side by side (1.5.0 = Uno 6, 1.5.1 = Uno 7),
+          # consumers restore today. DH-2969: lines run side by side (1.5.0 = Uno 6, 1.5.2 = Uno 7),
           # and a new line's TFM set legitimately differs from the old one's. A line's FIRST version
           # has no same-line reference, so it is compared with the newest stable of any line and a
           # layout difference is a warning (a tag push has no allow_layout_change input).

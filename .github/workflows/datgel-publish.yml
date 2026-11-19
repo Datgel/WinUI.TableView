@@ -133,6 +133,7 @@ jobs:
           }
           if ($version -notmatch $versionPattern) { throw "Version '$version' is not 4-part (Major.Minor.Build.Revision[-prerelease])." }
           $line = "datgel/v$($Matches[1]).$($Matches[2]).$($Matches[3])-patched"
+          $linePrefix = "$($Matches[1]).$($Matches[2]).$($Matches[3])."
 
           if ($publish) {
             # A published version must come from the patched branch it is named after.
@@ -153,6 +154,7 @@ jobs:
           "PACKAGE_VERSION=$version" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "PUBLISH=$publish"         | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "ALLOW_LAYOUT=$allowLayout" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "LINE_PREFIX=$linePrefix"  | Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Read the feed (refuse an existing version, fetch the reference package)
         run: |
@@ -164,10 +166,20 @@ jobs:
             if ($env:PUBLISH -eq 'True') { throw "$env:PACKAGE_ID $env:PACKAGE_VERSION is ALREADY on the feed - versions are immutable; choose the next one." }
             Write-Host "::warning::$env:PACKAGE_VERSION is already on the feed (dry run, so not fatal)."
           }
-          # Reference = newest stable version on the feed: the layout every Hub head restores today.
+          # Reference = newest stable version OF THIS LINE (X.Y.Z) on the feed: the layout its
+          # consumers restore today. DH-2969: lines run side by side (1.5.0 = Uno 6, 1.5.2 = Uno 7),
+          # and a new line's TFM set legitimately differs from the old one's. A line's FIRST version
+          # has no same-line reference, so it is compared with the newest stable of any line and a
+          # layout difference is a warning (a tag push has no allow_layout_change input).
           $stable = $versions | Where-Object { $_ -notmatch '-' } | Sort-Object { [version]$_ } -Descending
           if (-not $stable) { throw "No stable $env:PACKAGE_ID on the feed to compare against." }
-          $ref = $stable[0]
+          $sameLine = @($stable | Where-Object { $_.StartsWith($env:LINE_PREFIX) })
+          if ($sameLine.Count -gt 0) { $ref = $sameLine[0]; $firstOnLine = $false }
+          else {
+            $ref = $stable[0]; $firstOnLine = $true
+            Write-Host "::notice::No stable $($env:LINE_PREFIX)x on the feed: $env:PACKAGE_VERSION is the line's first version, compared with $ref."
+          }
+          "FIRST_ON_LINE=$firstOnLine" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
           New-Item -ItemType Directory -Force artifacts/reference | Out-Null
           $refPath = "artifacts/reference/$($env:PACKAGE_ID.ToLowerInvariant()).$ref.nupkg"
           Save-FeedPackage -Version $ref -OutFile $refPath
@@ -179,8 +191,6 @@ jobs:
         uses: actions/setup-dotnet@v5.0.1
         with:
           dotnet-version: |
-            8.0.x
-            9.0.x
             10.0.100
 
       - name: Setup MSBuild.exe
@@ -227,7 +237,9 @@ jobs:
           $extra   = $new.Lib | Where-Object { $old.Lib -notcontains $_ }
           if ($missing -or $extra) {
             $msg = "lib/ layout differs from $env:REFERENCE_VERSION. Missing: [$($missing -join ', ')]  Extra: [$($extra -join ', ')]"
-            if ($env:ALLOW_LAYOUT -eq 'True') { Write-Host "::warning::$msg (allowed by allow_layout_change)" } else { throw "$msg - rerun with allow_layout_change if a TFM change is intended." }
+            if ($env:ALLOW_LAYOUT -eq 'True') { Write-Host "::warning::$msg (allowed by allow_layout_change)" }
+            elseif ($env:FIRST_ON_LINE -eq 'True') { Write-Host "::warning::$msg (first version of its line, so the reference is another line's)" }
+            else { throw "$msg - rerun with allow_layout_change if a TFM change is intended." }
           }
           # Every TFM must carry the assembly itself.
           $tfms = $new.Lib | ForEach-Object { ($_ -split '/')[1] } | Sort-Object -Unique

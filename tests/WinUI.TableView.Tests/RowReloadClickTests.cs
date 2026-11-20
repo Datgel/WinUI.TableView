@@ -273,12 +273,9 @@ public class RowReloadClickTests
 
         if (misses.Count > 0)
         {
-            Assert.Fail($"{when}: {misses.Count} click(s) did not select exactly the clicked cell:
-  "
-                + string.Join("
-  ", misses)
-                + "
-" + DescribeBookkeeping(tableView, canvas!));
+            Assert.Fail($"{when}: {misses.Count} click(s) did not select exactly the clicked cell:\n  "
+                + string.Join("\n  ", misses)
+                + "\n" + DescribeBookkeeping(tableView, canvas!));
         }
     }
 

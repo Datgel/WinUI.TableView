@@ -778,14 +778,17 @@ public partial class TableView : ListView
         var minRow = -1;
         var maxRow = -1;
 
+        // Datgel DH-6303: place each row where it is NOW (TryGetLiveRowTop), never from its cached Position. After a
+        // row reload that cache is stale (Uno re-places recycled rows in reverse order, DH-6234), so a plain click
+        // selected the stale row as well as the pressed one: one click made a block, and the selection disagreed with
+        // the current cell that the release set (Hub UI run 44733256022, the selection-toolbar test).
         for (var rowIndex = 0; rowIndex < Items.Count; rowIndex++)
         {
-            if (ContainerFromIndex(rowIndex) is not TableViewRow row)
+            if (ContainerFromIndex(rowIndex) is not TableViewRow row || !TryGetLiveRowTop(row, out var rowTop))
             {
                 continue;
             }
 
-            var rowTop = row.Position.Y;
             var rowBottom = rowTop + row.ActualHeight;
 
             if (rowBottom <= rectTop || rowTop >= rectBottom)
@@ -3075,7 +3078,7 @@ public partial class TableView : ListView
     /// </summary>
     private int? GetRowIndexAtCanvasPoint(Point canvasPoint)
     {
-        if (DragRectangleCanvas is not { } canvas) return null;
+        if (DragRectangleCanvas is null) return null;
 
         // Datgel DH-6234: hit-test the rows the items panel is SHOWING, where they are NOW. This used to walk _rows
         // comparing each row's cached Position, and after the rows were reloaded (a Reset, or Clear then re-add) that
@@ -3088,26 +3091,40 @@ public partial class TableView : ListView
             var index = IndexFromContainer(row);
             if (index < 0 || row.Visibility != Visibility.Visible || row.ActualHeight <= 0) continue;
 
-            Point rowTop;
-            try
-            {
-                rowTop = row.TransformToVisual(canvas).TransformPoint(default);
-            }
-            catch (Exception ex)
-            {
-                TableViewTrace.Write($"GetRowIndexAtCanvasPoint: could not place row {index}: {ex.Message}");
-                continue;
-            }
+            if (!TryGetLiveRowTop(row, out var rowTop)) continue;
 
-            row.Position = rowTop;
-
-            if (canvasPoint.Y >= rowTop.Y && canvasPoint.Y < rowTop.Y + row.ActualHeight)
+            if (canvasPoint.Y >= rowTop && canvasPoint.Y < rowTop + row.ActualHeight)
             {
                 return index;
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Datgel DH-6234 / DH-6303: the ONE way a hit-test places a row - its top edge in <see cref="DragRectangleCanvas"/>
+    /// coordinates, measured from the visual tree now. <see cref="TableViewRow.Position"/> is a cache that goes stale
+    /// after a row reload, so no hit-test may read it; this refreshes it as a side effect. Returns <c>false</c> when the
+    /// row cannot be placed (no canvas, or the row is not in the canvas's tree).
+    /// </summary>
+    private bool TryGetLiveRowTop(TableViewRow row, out double top)
+    {
+        top = 0;
+        if (DragRectangleCanvas is not { } canvas) return false;
+
+        try
+        {
+            var position = row.TransformToVisual(canvas).TransformPoint(default);
+            row.Position = position;
+            top = position.Y;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            TableViewTrace.Write($"TryGetLiveRowTop: could not place row {row.Index}: {ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>

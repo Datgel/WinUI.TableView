@@ -145,6 +145,140 @@ public class RowReloadClickTests
         AssertEveryRealisedCellClicksCurrent(tableView, "rows 0 and 2 with swapped cached positions");
     }
 
+    // Datgel DH-6303: the SELECTION a click makes. The press runs a drag selection (MakeSelectionInDragRect ->
+    // GetRowsInDragRect) BEFORE the release sets the current cell, and 1.5.0.17 placed rows there from the stale cached
+    // Position: one click after a reload selected the stale row as well, so a single click made a block (Hub UI run
+    // 44733256022, the selection-toolbar test). These click the way the press and the release do and assert the click
+    // selected exactly the clicked cell, and that it is current.
+
+    [UITestMethod]
+    public async Task AClick_WithNoReload_SelectsOnlyTheClickedCell()
+    {
+        var (tableView, _) = await CreateTableViewAsync();
+        await AssertEveryRealisedCellClickSelectsOnlyItselfAsync(tableView, "no reload");
+    }
+
+    [UITestMethod]
+    public async Task AClick_AfterTheRowsWereClearedAndReAdded_SelectsOnlyTheClickedCell()
+    {
+        var (tableView, items) = await CreateTableViewAsync();
+
+        items.Clear();
+        await Task.Yield();
+        foreach (var item in NewItems("b"))
+            items.Add(item);
+        await SettleAsync(tableView);
+
+        await AssertEveryRealisedCellClickSelectsOnlyItselfAsync(tableView, "after Clear + re-add");
+    }
+
+    [UITestMethod]
+    public async Task AClick_AfterTheItemsSourceWasReplaced_SelectsOnlyTheClickedCell()
+    {
+        var (tableView, _) = await CreateTableViewAsync();
+
+        tableView.ItemsSource = new ObservableCollection<Item>(NewItems("d"));
+        await SettleAsync(tableView);
+
+        await AssertEveryRealisedCellClickSelectsOnlyItselfAsync(tableView, "after ItemsSource replaced");
+    }
+
+    [UITestMethod]
+    public async Task AClick_AfterSeveralReloads_SelectsOnlyTheClickedCell()
+    {
+        var (tableView, items) = await CreateTableViewAsync();
+
+        for (var pass = 0; pass < 3; pass++)
+        {
+            items.Clear();
+            await Task.Yield();
+            foreach (var item in NewItems($"e{pass}-"))
+                items.Add(item);
+            await SettleAsync(tableView);
+        }
+
+        await AssertEveryRealisedCellClickSelectsOnlyItselfAsync(tableView, "after three reloads");
+    }
+
+    /// <summary>The fault on its own, so the drag selection is pinned on WinAppSDK too (where a reload alone does not
+    /// make the cache stale, DH-6234): rows 0 and 2 with swapped cached positions.</summary>
+    [UITestMethod]
+    public async Task AClick_OnARowWhoseCachedPositionIsStale_SelectsOnlyTheClickedCell()
+    {
+        var (tableView, _) = await CreateTableViewAsync();
+        var rows = RowList(tableView);
+        var row0 = rows.First(r => r.Index == 0);
+        var row2 = rows.First(r => r.Index == 2);
+
+        await AssertEveryRealisedCellClickSelectsOnlyItselfAsync(tableView, "rows 0 and 2 with swapped cached positions",
+            beforeEachClick: () => (row0.Position, row2.Position) = (row2.Position, row0.Position));
+    }
+
+    /// <summary>Clicks the centre of every column of every realised row that is fully in view, running what a press does
+    /// (OnAnyPointerPressed: anchor on the pressed cell, start the drag, select what the drag rectangle covers) and then
+    /// the release, and asserts the selection is exactly that cell and it is current. <paramref name="beforeEachClick"/>
+    /// re-applies an injected fault, since every hit-test may refresh the cache it corrupts.</summary>
+    private static async Task AssertEveryRealisedCellClickSelectsOnlyItselfAsync(TableView tableView, string when, System.Action? beforeEachClick = null)
+    {
+        var canvas = tableView.DragRectangleCanvas;
+        Assert.IsNotNull(canvas, "Precondition: the template has its drag canvas");
+        Assert.IsTrue(tableView.ShowDragRectangle, "Precondition: the drag rectangle is shown (the cell drag selection needs it)");
+
+        var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+        var makeSelection = typeof(TableView).GetMethod("MakeSelectionInDragRect", flags)!;
+        var lastCellRange = typeof(TableView).GetField("_lastDragSelectionCellRange", flags)!;
+        var lastRowRange = typeof(TableView).GetField("_lastDragSelectionRowRange", flags)!;
+
+        var shown = tableView.FindDescendants().OfType<TableViewRow>()
+            .Where(r => r.Index >= 0 && r.Visibility == Visibility.Visible && r.ActualHeight > 0)
+            .Where(r => IsFullyInView(tableView, r))
+            .OrderBy(r => r.Index)
+            .ToList();
+        Assert.IsTrue(shown.Count >= 3, $"Precondition ({when}): at least three rows are in view, found {shown.Count}");
+
+        var misses = new List<string>();
+        foreach (var row in shown)
+        {
+            foreach (var cell in row.Cells.Where(c => c.ActualWidth > 0))
+            {
+                var centre = cell.TransformToVisual(canvas).TransformPoint(new Point(cell.ActualWidth / 2, cell.ActualHeight / 2));
+                var expected = new TableViewCellSlot(row.Index, cell.Index);
+                beforeEachClick?.Invoke();
+
+                // The press, as OnAnyPointerPressed runs it for a cell in a cell-selection table.
+                tableView.CurrentCellSlot = null;
+                lastCellRange.SetValue(tableView, null);
+                lastRowRange.SetValue(tableView, null);
+                tableView.SelectionStartCellSlot = expected;
+                tableView.SelectionStartRowIndex = expected.Row;
+                tableView.LastSelectionUnit = TableViewSelectionUnit.Cell;
+                tableView.StartDragSelection(centre);
+                makeSelection.Invoke(tableView, null);
+                // A mouse that does not move still reports a move at the press point.
+                tableView.UpdateDragRectangleVisual(centre);
+                makeSelection.Invoke(tableView, null);
+                // The release.
+                tableView.EndDragSelection();
+
+                // The drag selection is applied on a queued callback.
+                await Task.Delay(50);
+
+                var selected = tableView.SelectedCells.OrderBy(s => s.Row).ThenBy(s => s.Column).ToList();
+                if (selected.Count != 1 || selected[0] != expected || tableView.CurrentCellSlot != expected)
+                {
+                    misses.Add($"row {row.Index} col {cell.Index} at y={centre.Y:0.#}: selected [{string.Join(" ", selected.Select(s => Describe(s)))}], current {Describe(tableView.CurrentCellSlot)}");
+                }
+            }
+        }
+
+        if (misses.Count > 0)
+        {
+            Assert.Fail($"{when}: {misses.Count} click(s) did not select exactly the clicked cell:\n  "
+                + string.Join("\n  ", misses)
+                + "\n" + DescribeBookkeeping(tableView, canvas!));
+        }
+    }
+
     private static List<TableViewRow> RowList(TableView tableView) =>
         (List<TableViewRow>)typeof(TableView)
             .GetField("_rows", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!

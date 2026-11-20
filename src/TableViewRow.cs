@@ -244,6 +244,8 @@ public partial class TableViewRow : ListViewItem
     /// <summary>
     /// Gets or sets the position of the row relative to the TableView.
     /// </summary>
+    /// <remarks>Datgel DH-6303: a CACHE, stale after a row reload (DH-6234). Hit-tests must not read it - they place a
+    /// row through <c>TableView.TryGetLiveRowTop</c>, which refreshes it.</remarks>
     internal Point Position { get; set; }
 
     /// <summary>

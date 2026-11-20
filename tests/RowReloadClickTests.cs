@@ -118,6 +118,38 @@ public class RowReloadClickTests
         AssertEveryRealisedCellClicksCurrent(tableView, "after three reloads");
     }
 
+    /// <summary>The bookkeeping fault on its own: a shown row that the table's row list lost (a recycled container is
+    /// re-listed only on a deferred Prepare callback, after the synchronous Clear took it out).</summary>
+    [UITestMethod]
+    public async Task AClick_OnAShownRowTheRowListLost_MakesTheClickedCellCurrent()
+    {
+        var (tableView, _) = await CreateTableViewAsync();
+        var rows = RowList(tableView);
+        var lost = rows.First(r => r.Index == 1);
+        rows.Remove(lost);
+
+        AssertEveryRealisedCellClicksCurrent(tableView, "row 1 not in _rows");
+    }
+
+    /// <summary>The other fault: a shown row whose cached position is where it USED to be (its ArrangeOverride skipped
+    /// UpdatePosition while it was unlinked, or the panel moved it without re-arranging it).</summary>
+    [UITestMethod]
+    public async Task AClick_OnARowWhoseCachedPositionIsStale_MakesTheClickedCellCurrent()
+    {
+        var (tableView, _) = await CreateTableViewAsync();
+        var rows = RowList(tableView);
+        var row0 = rows.First(r => r.Index == 0);
+        var row2 = rows.First(r => r.Index == 2);
+        (row0.Position, row2.Position) = (row2.Position, row0.Position);
+
+        AssertEveryRealisedCellClicksCurrent(tableView, "rows 0 and 2 with swapped cached positions");
+    }
+
+    private static List<TableViewRow> RowList(TableView tableView) =>
+        (List<TableViewRow>)typeof(TableView)
+            .GetField("_rows", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .GetValue(tableView)!;
+
     /// <summary>Clicks the centre of every column of every realised row that is fully in view and asserts that cell is
     /// current after the release. A failure names every row that missed and the table's row bookkeeping.</summary>
     private static void AssertEveryRealisedCellClicksCurrent(TableView tableView, string when)

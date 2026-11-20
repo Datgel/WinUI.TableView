@@ -2691,20 +2691,60 @@ public partial class TableView : ListView
     /// </summary>
     private int? GetRowIndexAtCanvasPoint(Point canvasPoint)
     {
-        if (DragRectangleCanvas is null) return null;
+        if (DragRectangleCanvas is not { } canvas) return null;
 
-        foreach (var row in _rows)
+        // Datgel DH-6234: hit-test the rows the items panel is SHOWING, where they are NOW. This used to walk _rows
+        // comparing each row's cached Position, and after the rows were reloaded (a Reset, or Clear then re-add) that
+        // bookkeeping can be wrong both ways: a recycled container is re-listed only on a deferred Prepare callback, and
+        // its Position is refreshed only by an ArrangeOverride that skips it while the row is unlinked (and is not run at
+        // all when the panel moves a row without resizing it). Then a click found no row, so the release set no current
+        // cell (Hub UI runs 44629726609 / 44641934849). This runs once per release, over the realised rows only.
+        foreach (var row in RowsForHitTest())
         {
-            var rowTop = row.Position.Y;
-            var rowBottom = rowTop + row.ActualHeight;
+            var index = IndexFromContainer(row);
+            if (index < 0 || row.Visibility != Visibility.Visible || row.ActualHeight <= 0) continue;
 
-            if (canvasPoint.Y >= rowTop && canvasPoint.Y < rowBottom)
+            Point rowTop;
+            try
             {
-                return row.Index;
+                rowTop = row.TransformToVisual(canvas).TransformPoint(default);
+            }
+            catch (Exception ex)
+            {
+                TableViewTrace.Write($"GetRowIndexAtCanvasPoint: could not place row {index}: {ex.Message}");
+                continue;
+            }
+
+            row.Position = rowTop;
+
+            if (canvasPoint.Y >= rowTop.Y && canvasPoint.Y < rowTop.Y + row.ActualHeight)
+            {
+                return index;
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Datgel DH-6234: the rows a release hit-test considers - the items panel's own children (the containers it is
+    /// showing) first, then <see cref="_rows"/> for a panel that is not there yet. A row may come twice; the first match
+    /// wins and a container that holds no item (<c>IndexFromContainer</c> &lt; 0) is skipped.
+    /// </summary>
+    private IEnumerable<TableViewRow> RowsForHitTest()
+    {
+        if (ItemsPanelRoot is { } panel)
+        {
+            foreach (var child in panel.Children)
+            {
+                if (child is TableViewRow row) yield return row;
+            }
+        }
+
+        foreach (var row in _rows.ToArray())
+        {
+            yield return row;
+        }
     }
 
     /// <summary>

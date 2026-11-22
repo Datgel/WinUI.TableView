@@ -19,6 +19,9 @@ namespace WinUI.TableView.Tests;
 [TestClass]
 public class ScrollRowIntoViewTopRowTests
 {
+    /// <summary>Hub's header band height in DIP (about 70, measured in Hub run 44835568693).</summary>
+    private const double HubHeaderBand = 70;
+
     [UITestMethod]
     public async Task Making_the_whole_top_visible_row_current_does_not_scroll_the_table()
     {
@@ -60,6 +63,9 @@ public class ScrollRowIntoViewTopRowTests
             AutoGenerateColumns = false,
             SelectionUnit = TableViewSelectionUnit.Cell,
             Height = 400,
+            // As Hub sets it (TableViewGridProvider: the header band's height). The default is NaN, and no row top is
+            // ever below NaN, so the defect needs a real header height to show.
+            HeaderRowHeight = HubHeaderBand,
         };
         tableView.Columns.Add(new TableViewTextColumn
         {

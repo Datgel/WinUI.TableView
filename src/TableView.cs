@@ -3009,6 +3009,26 @@ public partial class TableView : ListView
     }
 
     /// <summary>
+    /// Datgel DH-6363 — the vertical offset that shows a row whose top is <paramref name="rowTopInViewer"/> in the content
+    /// <see cref="ScrollViewer"/>, or null when it needs no scroll: row 0 goes to the very top (offset 0); any other row is
+    /// scrolled only when its top is ABOVE the viewer's top, and then just far enough to show that top.
+    ///
+    /// <para>The header row is NOT inside that viewer: the template puts it in its own grid row above it (Themes/TableView.xaml:
+    /// <c>HeaderRow</c> in Grid.Row 0, <c>ScrollViewer</c> in Grid.Row 1), so a row's top in the viewer is already below the
+    /// header. This used to compare that top with <see cref="HeaderRowHeight"/>, which read every row in the viewer's first
+    /// <see cref="HeaderRowHeight"/> DIPs as hidden: a click on the whole top visible row of a scrolled table made it current
+    /// and scrolled the table up by about one row (Hub UI run 44922704618, a 46 DIP jump on a row wholly in view). A row
+    /// below the viewport is already brought in by the native <c>ScrollIntoView</c> before this is asked.</para>
+    /// </summary>
+    internal static double? RevealRowOffset(int index, double verticalOffset, double rowTopInViewer)
+    {
+        if (index == 0)
+            return verticalOffset > 0 ? 0d : null;
+        // Half a DIP of slack: a row aligned to the viewer's top can read a rounding hair above it.
+        return rowTopInViewer < -0.5 ? Math.Max(0d, verticalOffset + rowTopInViewer) : null;
+    }
+
+    /// <summary>
     /// Scrolls the specified row into view.
     /// </summary>
     /// <param name="index">The index of the row to scroll into view.</param>
@@ -3030,9 +3050,8 @@ public partial class TableView : ListView
             {
                 var transform = row.TransformToVisual(_scrollViewer);
                 var positionInScrollViewer = transform.TransformPoint(new Point(0, 0));
-                if ((index == 0 && _scrollViewer.VerticalOffset > 0) || (index > 0 && positionInScrollViewer.Y < HeaderRowHeight))
+                if (RevealRowOffset(index, _scrollViewer.VerticalOffset, positionInScrollViewer.Y) is { } yOffset)
                 {
-                    var yOffset = index == 0 ? 0d : _scrollViewer.VerticalOffset - row.ActualHeight + positionInScrollViewer.Y + 8;
                     var tcs = new TaskCompletionSource<object?>();
 
                     try

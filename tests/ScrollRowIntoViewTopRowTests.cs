@@ -19,6 +19,28 @@ namespace WinUI.TableView.Tests;
 [TestClass]
 public class ScrollRowIntoViewTopRowTests
 {
+    [TestMethod]
+    public void A_row_whose_top_is_at_or_below_the_viewers_top_needs_no_scroll()
+    {
+        Assert.IsNull(TableView.RevealRowOffset(index: 5, verticalOffset: 230, rowTopInViewer: 0));
+        Assert.IsNull(TableView.RevealRowOffset(5, 230, 46), "the second visible row, inside the old HeaderRowHeight band");
+        Assert.IsNull(TableView.RevealRowOffset(5, 230, -0.3), "a rounding hair above the top");
+    }
+
+    [TestMethod]
+    public void A_row_partly_above_the_viewer_is_scrolled_just_far_enough_to_show_its_top()
+    {
+        Assert.AreEqual(210d, TableView.RevealRowOffset(5, 230, -20));
+        Assert.AreEqual(0d, TableView.RevealRowOffset(1, 10, -30), "never above the top of the content");
+    }
+
+    [TestMethod]
+    public void Row_zero_goes_to_the_very_top_only_when_the_table_is_scrolled()
+    {
+        Assert.AreEqual(0d, TableView.RevealRowOffset(0, 120, -120));
+        Assert.IsNull(TableView.RevealRowOffset(0, 0, 0));
+    }
+
     [UITestMethod]
     public async Task Making_the_whole_top_visible_row_current_does_not_scroll_the_table()
     {

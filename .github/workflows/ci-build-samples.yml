@@ -7,7 +7,8 @@ on:
       - 'docs/**'
 
   pull_request:
-    branches: main
+    # DH-2969: also the fork's patched lines, so a PR into datgel/v1.5.2-patched (Uno 7) builds and tests.
+    branches: [ main, 'datgel/v*-patched' ]
     paths-ignore:
       - 'docs/**'
 
@@ -32,8 +33,6 @@ jobs:
       uses: actions/setup-dotnet@v5.0.1
       with:
         dotnet-version: |
-          8.0.x
-          9.0.x
           10.0.100
 
     - name: Build WinUI sample app
@@ -62,8 +61,6 @@ jobs:
       uses: actions/setup-dotnet@v5.0.1
       with:
         dotnet-version: |
-          8.0.x
-          9.0.x
           10.0.100
 
     - name: Restore Uno workloads
@@ -87,7 +84,7 @@ jobs:
     env:
       DIST_PATH: samples/WinUI.TableView.SampleApp.Uno/bin/Release/net10.0-browserwasm/publish/wwwroot
       DotnetVersion: '10.0.100'
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CONTROL_RUNNER || '["ubuntu-latest"]') }}
     container: 'unoplatform/wasm-build:3.0'
     steps:
       - uses: actions/checkout@v6.0.3
@@ -133,6 +130,8 @@ jobs:
         with:
           dotnet-version: ${{ env.DotnetVersion }}
 
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.tool_cache }}/dotnet  # SYA-870 - per-slot, writable on the guests
       - uses: dotnet/nbgv@f088059084cb5d872e9d1a994433ca6440c2bf72 # v0.4.2
         id: nbgv
         with:
@@ -166,7 +165,7 @@ jobs:
   deploy-uno-wasm:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build-uno-wasm
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.CONTROL_RUNNER || '["ubuntu-latest"]') }}
     steps:
       - name: Download Uno wasm artifacts
         uses: actions/download-artifact@v7
@@ -211,8 +210,6 @@ jobs:
       uses: actions/setup-dotnet@v5.0.1
       with:
         dotnet-version: |
-          8.0.x
-          9.0.x
           10.0.100
 
     - name: Restore Uno workloads

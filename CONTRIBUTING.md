@@ -105,6 +105,19 @@ This fork (`Datgel/WinUI.TableView`) repacks upstream plus Datgel's patches as
 The working branch is `datgel/v<X.Y.Z>-patched` (today `datgel/v1.5.0-patched`); fork
 PRs target it, never `main` (which mirrors upstream).
 
+**Two lines side by side (DH-2969, 2026-11-17; Uno 7 line re-cut on upstream v1.5.2 2026-11-19):**
+
+| Line | Base | Uno / WinAppSDK | TFMs | Versions |
+|---|---|---|---|---|
+| `datgel/v1.5.0-patched` | upstream v1.5.0 | Uno 6 / WinAppSDK 1.8 | net8/9/10 (+ `-windows`) | 1.5.0.x (Hub until it adopts Uno 7) |
+| `datgel/v1.5.2-patched` | upstream v1.5.2 (re-cut 2026-11-19, DH-2969) plus the fork patches of the DH-2825 re-cut and DH-5839 | Uno 7 / WinAppSDK 2.x | `net10.0`, `net10.0-windows10.0.19041.0` | 1.5.2.x |
+
+The version's `X.Y.Z` picks the line, so a 1.5.2.x tag can only publish an Uno 7 build and a
+1.5.0.x tag only an Uno 6 one. A line's first version has no same-line package on the feed, so its
+`lib/` layout is compared with the other line's and a difference is a warning, not a failure.
+A fix that both lines need is made twice (one PR per line). `datgel/v1.5.1-patched` (cut on
+upstream main after v1.5.1) was superseded by the v1.5.2 re-cut before anything was published from it.
+
 Publishing is done by `.github/workflows/datgel-publish.yml` (DH-2508), never from a dev box.
 
 **Cut a release** once the fork PR is merged into `datgel/v<X.Y.Z>-patched`:

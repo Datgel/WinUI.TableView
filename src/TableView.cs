@@ -778,14 +778,17 @@ public partial class TableView : ListView
         var minRow = -1;
         var maxRow = -1;
 
+        // Datgel DH-6303: place each row where it is NOW (TryGetLiveRowTop), never from its cached Position. After a
+        // row reload that cache is stale (Uno re-places recycled rows in reverse order, DH-6234), so a plain click
+        // selected the stale row as well as the pressed one: one click made a block, and the selection disagreed with
+        // the current cell that the release set (Hub UI run 44733256022, the selection-toolbar test).
         for (var rowIndex = 0; rowIndex < Items.Count; rowIndex++)
         {
-            if (ContainerFromIndex(rowIndex) is not TableViewRow row)
+            if (ContainerFromIndex(rowIndex) is not TableViewRow row || !TryGetLiveRowTop(row, out var rowTop))
             {
                 continue;
             }
 
-            var rowTop = row.Position.Y;
             var rowBottom = rowTop + row.ActualHeight;
 
             if (rowBottom <= rectTop || rowTop >= rectBottom)
@@ -3006,6 +3009,26 @@ public partial class TableView : ListView
     }
 
     /// <summary>
+    /// Datgel DH-6363 — the vertical offset that shows a row whose top is <paramref name="rowTopInViewer"/> in the content
+    /// <see cref="ScrollViewer"/>, or null when it needs no scroll: row 0 goes to the very top (offset 0); any other row is
+    /// scrolled only when its top is ABOVE the viewer's top, and then just far enough to show that top.
+    ///
+    /// <para>The header row is NOT inside that viewer: the template puts it in its own grid row above it (Themes/TableView.xaml:
+    /// <c>HeaderRow</c> in Grid.Row 0, <c>ScrollViewer</c> in Grid.Row 1), so a row's top in the viewer is already below the
+    /// header. This used to compare that top with <see cref="HeaderRowHeight"/>, which read every row in the viewer's first
+    /// <see cref="HeaderRowHeight"/> DIPs as hidden: a click on the whole top visible row of a scrolled table made it current
+    /// and scrolled the table up by about one row (Hub UI run 44922704618, a 46 DIP jump on a row wholly in view). A row
+    /// below the viewport is already brought in by the native <c>ScrollIntoView</c> before this is asked.</para>
+    /// </summary>
+    internal static double? RevealRowOffset(int index, double verticalOffset, double rowTopInViewer)
+    {
+        if (index == 0)
+            return verticalOffset > 0 ? 0d : null;
+        // Half a DIP of slack: a row aligned to the viewer's top can read a rounding hair above it.
+        return rowTopInViewer < -0.5 ? Math.Max(0d, verticalOffset + rowTopInViewer) : null;
+    }
+
+    /// <summary>
     /// Scrolls the specified row into view.
     /// </summary>
     /// <param name="index">The index of the row to scroll into view.</param>
@@ -3027,9 +3050,8 @@ public partial class TableView : ListView
             {
                 var transform = row.TransformToVisual(_scrollViewer);
                 var positionInScrollViewer = transform.TransformPoint(new Point(0, 0));
-                if ((index == 0 && _scrollViewer.VerticalOffset > 0) || (index > 0 && positionInScrollViewer.Y < HeaderRowHeight))
+                if (RevealRowOffset(index, _scrollViewer.VerticalOffset, positionInScrollViewer.Y) is { } yOffset)
                 {
-                    var yOffset = index == 0 ? 0d : _scrollViewer.VerticalOffset - row.ActualHeight + positionInScrollViewer.Y + 8;
                     var tcs = new TaskCompletionSource<object?>();
 
                     try
@@ -3077,18 +3099,72 @@ public partial class TableView : ListView
     {
         if (DragRectangleCanvas is null) return null;
 
-        foreach (var row in _rows)
+        // Datgel DH-6234: hit-test the rows the items panel is SHOWING, where they are NOW. This used to walk _rows
+        // comparing each row's cached Position, and after the rows were reloaded (a Reset, or Clear then re-add) that
+        // bookkeeping can be wrong both ways: a recycled container is re-listed only on a deferred Prepare callback, and
+        // its Position is refreshed only by an ArrangeOverride that skips it while the row is unlinked (and is not run at
+        // all when the panel moves a row without resizing it). Then a click found no row, so the release set no current
+        // cell (Hub UI runs 44629726609 / 44641934849). This runs once per release, over the realised rows only.
+        foreach (var row in RowsForHitTest())
         {
-            var rowTop = row.Position.Y;
-            var rowBottom = rowTop + row.ActualHeight;
+            var index = IndexFromContainer(row);
+            if (index < 0 || row.Visibility != Visibility.Visible || row.ActualHeight <= 0) continue;
 
-            if (canvasPoint.Y >= rowTop && canvasPoint.Y < rowBottom)
+            if (!TryGetLiveRowTop(row, out var rowTop)) continue;
+
+            if (canvasPoint.Y >= rowTop && canvasPoint.Y < rowTop + row.ActualHeight)
             {
-                return row.Index;
+                return index;
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Datgel DH-6234 / DH-6303: the ONE way a hit-test places a row - its top edge in <see cref="DragRectangleCanvas"/>
+    /// coordinates, measured from the visual tree now. <see cref="TableViewRow.Position"/> is a cache that goes stale
+    /// after a row reload, so no hit-test may read it; this refreshes it as a side effect. Returns <c>false</c> when the
+    /// row cannot be placed (no canvas, or the row is not in the canvas's tree).
+    /// </summary>
+    private bool TryGetLiveRowTop(TableViewRow row, out double top)
+    {
+        top = 0;
+        if (DragRectangleCanvas is not { } canvas) return false;
+
+        try
+        {
+            var position = row.TransformToVisual(canvas).TransformPoint(default);
+            row.Position = position;
+            top = position.Y;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            TableViewTrace.Write($"TryGetLiveRowTop: could not place row {row.Index}: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Datgel DH-6234: the rows a release hit-test considers - the items panel's own children (the containers it is
+    /// showing) first, then <see cref="_rows"/> for a panel that is not there yet. A row may come twice; the first match
+    /// wins and a container that holds no item (<c>IndexFromContainer</c> &lt; 0) is skipped.
+    /// </summary>
+    private IEnumerable<TableViewRow> RowsForHitTest()
+    {
+        if (ItemsPanelRoot is { } panel)
+        {
+            foreach (var child in panel.Children)
+            {
+                if (child is TableViewRow row) yield return row;
+            }
+        }
+
+        foreach (var row in _rows.ToArray())
+        {
+            yield return row;
+        }
     }
 
     /// <summary>
